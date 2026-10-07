@@ -7,7 +7,7 @@
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны).
 // @author       emz13666
 // @license      MIT
-// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZkMjRkIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIycy04LTQtOC0xMFY1bDgtM2w4IDN2N2MwIDYtOCAxMC04IDEweiIvPjwvc3ZnPg==
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyNGQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTQuNSAxNy41TDMgNlYzaDNsMTEuNSAxMS41Ii8+PHBhdGggZD0ibTEzIDE5IDYtNiIvPjxwYXRoIGQ9Ik0xNiAxNmw0IDQiLz48cGF0aCBkPSJNMTkgMjFsMi0yIi8+PHBhdGggZD0iTTkuNSAxNy41IDIxIDZWM2gtM0w2LjUgMTQuNSIvPjxwYXRoIGQ9Im0xMSAxOS02LTYiLz48cGF0aCBkPSJNOCAxNmwtNCA0Ii8+PHBhdGggZD0iTTUgMjFsLTItMiIvPjwvc3ZnPg==
 // @match        https://www.hero-wars.com/*
 // @match        https://www.hero-wars.cn/*
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
