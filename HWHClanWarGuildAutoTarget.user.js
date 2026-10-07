@@ -7,7 +7,7 @@
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны).
 // @author       emz13666
 // @license      MIT
-// @icon         https://i.ibb.co/9k7g3wqW/icon.png
+// @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZkMjRkIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PHBhdGggZD0iTTEyIDIycy04LTQtOC0xMFY1bDgtM2w4IDN2N2MwIDYtOCAxMC04IDEweiIvPjwvc3ZnPg==
 // @match        https://www.hero-wars.com/*
 // @match        https://www.hero-wars.cn/*
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
