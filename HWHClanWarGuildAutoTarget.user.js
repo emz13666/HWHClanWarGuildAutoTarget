@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.21
+// @version      4.22
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
 // @author       emz13666
@@ -545,11 +545,6 @@
                 }
             }
 
-            if (freeSlots.size === 0) {
-                logPanel('⚠️ Нет свободных слотов.', 'warn');
-                scheduleAutoClose();
-                return;
-            }
 
             logPanel('📜 Запрос clanWarGetAvailableHistory...', 'info');
             setProgress(10);
@@ -560,7 +555,8 @@
                 return;
             }
 
-            const recentHistory = historyList.history.slice(0, 7);
+            const recentHistory = historyList.history.filter(hist =>!(parseInt(hist.season) === parseInt(currentSeason) && parseInt(hist.day) === parseInt(currentDay)));
+
             const newDataToMerge = {};
             let loadedDays = 0;
             for (const hist of recentHistory) {
@@ -591,6 +587,12 @@
                 }
             }
             logPanel(`📚 В базе ${historyKeys.length} дней, ${totalFullWins} побед (против текущей гильдии: ${totalWinsVsCurrentGuild}). Ищем цели...`, 'highlight');
+
+            if (freeSlots.size === 0) {
+                logPanel('⚠️ Нет свободных слотов.', 'warn');
+                scheduleAutoClose();
+                return;
+            }
 
             const replayCache = new Map();
             async function getReplayInfo(replayId) {
