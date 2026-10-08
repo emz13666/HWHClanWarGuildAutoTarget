@@ -2,9 +2,9 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.14
-// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Matches hero/titan types.
-// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны).
+// @version      4.17
+// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Matches hero/titan types. Shows team names in logs.
+// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны). В логах показывает имена героев/титанов.
 // @author       emz13666
 // @license      MIT
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyNGQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIxNC41IDE3LjUgMyA2IDMgMyA2IDMgMTcuNSAxNC41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSIxMyIgeTE9IjE5IiB4Mj0iMTkiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIxNiIgeTE9IjE2IiB4Mj0iMjAiIHkyPSIyMCI+PC9saW5lPjxsaW5lIHgxPSIxOSIgeTE9IjIxIiB4Mj0iMjEiIHkyPSIxOSI+PC9saW5lPjxwb2x5bGluZSBwb2ludHM9IjE0LjUgNi41IDE4IDMgMjEgMyAyMSA2IDE3LjUgOS41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSI1IiB5MT0iMTQiIHgyPSI5IiB5Mj0iMTgiPjwvbGluZT48bGluZSB4MT0iNyIgeTE9IjE3IiB4Mj0iMTEiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIzIiB5MT0iMTkiIHgyPSI1IiB5Mj0iMTciPjwvbGluZT48L3N2Zz4=
@@ -23,6 +23,7 @@
     const STORAGE_KEY = 'HWH_CW_History_Log_v1';
     const MAX_HISTORY_DAYS = 90;
     const AUTO_CLOSE_DELAY_MS = 5000;
+    const DEBUG_MODE = true; // 🔥 v4.17: Включить расширенную диагностику в консоль (F12)
 
     /* ================================================================ */
     /* 🔥 ОЖИДАНИЕ ЗАГРУЗКИ HWH                                       */
@@ -44,7 +45,6 @@
         return;
     }
 
-    // 🔥 Официальная регистрация расширения в HWH
     console.log(`%cStart Extension ${GM_info.script.name}, v${GM_info.script.version} by ${GM_info.script.author}`, 'color: #ffd24d');
     try {
         const { addExtentionName } = HWHFuncs;
@@ -75,7 +75,7 @@
 
     function isFullWin(battle) {
         if (!battle.win) return false;
-        if (battle.slotPoints === undefined || battle.slotPoints === null) return true; // Обратная совместимость
+        if (battle.slotPoints === undefined || battle.slotPoints === null) return true;
         return battle.slotPoints === 20;
     }
 
@@ -134,7 +134,7 @@
             const style = document.createElement('style');
             style.id = 'hwh-cw-panel-style';
             style.textContent = `
-                .hwh-cw-panel { position: fixed; top: 20px; right: 20px; width: 380px; max-height: 70vh; background: rgba(30, 25, 18, 0.95); border: 2px solid #8a6d3b; border-radius: 8px; color: #f3e3bd; font-family: Arial, sans-serif; font-size: 12px; z-index: 2147483000; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column; pointer-events: auto; }
+                .hwh-cw-panel { position: fixed; top: 20px; right: 20px; width: 420px; max-height: 70vh; background: rgba(30, 25, 18, 0.95); border: 2px solid #8a6d3b; border-radius: 8px; color: #f3e3bd; font-family: Arial, sans-serif; font-size: 12px; z-index: 2147483000; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column; pointer-events: auto; }
                 .hwh-cw-panel.minimized { max-height: 36px; overflow: hidden; }
                 .hwh-cw-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #3d2e1a; border-bottom: 1px solid #8a6d3b; border-radius: 6px 6px 0 0; cursor: move; user-select: none; }
                 .hwh-cw-panel-title { font-weight: bold; font-size: 13px; color: #ffd24d; }
@@ -151,6 +151,7 @@
                 .hwh-cw-log-line.warn { color: #ffd24d; }
                 .hwh-cw-log-line.error { color: #ff8a80; background: rgba(168, 50, 43, 0.15); }
                 .hwh-cw-log-line.highlight { color: #fff; background: rgba(138, 109, 59, 0.3); font-weight: bold; }
+                .hwh-cw-log-line.team-names { color: #ffd24d; font-style: italic; font-size: 11px; padding-left: 12px; }
                 .hwh-cw-panel-body::-webkit-scrollbar { width: 6px; }
                 .hwh-cw-panel-body::-webkit-scrollbar-track { background: #1a140d; }
                 .hwh-cw-panel-body::-webkit-scrollbar-thumb { background: #8a6d3b; border-radius: 3px; }
@@ -235,6 +236,7 @@
         document.addEventListener('mouseup', () => { isDragging = false; handle.style.cursor = 'move'; });
     }
 
+    // 🔥 v4.17: Лог в панель И в консоль (важные сообщения)
     function logPanel(message, type = 'info') {
         const consoleMethod = type === 'error' ? console.error : type === 'warn' ? console.warn : console.log;
         consoleMethod(`[HWH CW Auto] ${message}`);
@@ -245,6 +247,27 @@
         panelLog.appendChild(line);
         while (panelLog.children.length > 200) panelLog.removeChild(panelLog.firstChild);
         panelLog.scrollTop = panelLog.scrollHeight;
+    }
+
+    // 🔥 v4.17: Лог ТОЛЬКО в консоль (расширенная диагностика)
+    function logDebug(message, ...args) {
+        if (!DEBUG_MODE) return;
+        if (args.length > 0) {
+            console.log(`[HWH CW Auto][DEBUG] ${message}`, ...args);
+        } else {
+            console.log(`%c[HWH CW Auto][DEBUG] ${message}`, 'color: #888; font-style: italic;');
+        }
+    }
+
+    function logTeamNames(prefix, namesString) {
+        if (!panelLog) createPanel();
+        const line = document.createElement('div');
+        line.className = 'hwh-cw-log-line team-names';
+        line.textContent = `${prefix}${namesString}`;
+        panelLog.appendChild(line);
+        while (panelLog.children.length > 200) panelLog.removeChild(panelLog.firstChild);
+        panelLog.scrollTop = panelLog.scrollHeight;
+        console.log(`[HWH CW Auto] ${prefix}${namesString}`);
     }
 
     function setProgress(percent) {
@@ -264,6 +287,58 @@
                 destroyPanel();
             }
         }, AUTO_CLOSE_DELAY_MS);
+    }
+
+    /* ================================================================ */
+    /* 🔥 ПЕРЕВОД ID ГЕРОЕВ/ТИТАНОВ В ИМЕНА                           */
+    /* ================================================================ */
+    const heroNameCache = new Map();
+
+    function getHeroName(heroId) {
+        if (!heroId) return '?';
+        const id = String(heroId);
+        if (heroNameCache.has(id)) return heroNameCache.get(id);
+        
+        let name = null;
+        try {
+            if (typeof cheats !== 'undefined' && typeof cheats.translate === 'function') {
+                const translated = cheats.translate(`LIB_HERO_NAME_${id}`);
+                if (translated && !translated.startsWith('LIB_HERO_NAME_')) {
+                    name = translated;
+                }
+            }
+        } catch (e) { /* ignore */ }
+        
+        if (!name) {
+            try {
+                if (typeof lib !== 'undefined' && lib.data?.hero?.[id]) {
+                    const heroData = lib.data.hero[id];
+                    if (typeof cheats !== 'undefined' && typeof cheats.translate === 'function') {
+                        const translated = cheats.translate(heroData.name || `LIB_HERO_NAME_${id}`);
+                        if (translated && !translated.startsWith('LIB_HERO_NAME_')) {
+                            name = translated;
+                        }
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+        
+        if (!name) name = `ID:${id}`;
+        
+        heroNameCache.set(id, name);
+        return name;
+    }
+
+    function getTeamNamesString(team) {
+        if (!team) return '';
+        let ids = [];
+        if (Array.isArray(team)) ids = team.map(h => h.id).filter(id => id);
+        else if (typeof team === 'object') ids = Object.values(team).map(h => h.id).filter(id => id);
+        
+        if (ids.length === 0) return '';
+        
+        ids.sort((a, b) => a - b);
+        return ids.map(id => getHeroName(id)).join(', ');
     }
 
     /* ================================================================ */
@@ -300,6 +375,10 @@
         cancelAutoClose();
         setPanelTitle('🎯 Авто-цели ВГ: запуск...');
         setProgress(0);
+
+        if (DEBUG_MODE) {
+            logDebug('🔧 DEBUG_MODE включён. Расширенные логи выводятся в консоль (F12).');
+        }
 
         try {
             if (typeof Caller === 'undefined' || typeof Caller.send === 'undefined') {
@@ -395,7 +474,12 @@
                     const teamObj = slotData.team?.[0] || {};
                     const teamString = getTeamSignature(teamObj);
                     const teamType = getTeamType(teamObj);
-                    freeSlots.set(parseInt(slotId), { slotId: parseInt(slotId), defenderId, teamString, teamType, defenderName });
+                    const teamNames = getTeamNamesString(teamObj);
+                    freeSlots.set(parseInt(slotId), { 
+                        slotId: parseInt(slotId), defenderId, teamString, teamType, 
+                        defenderName, teamNames 
+                    });
+                    logDebug(`✅ Свободный слот #${slotId} (${defenderName}): тип=${teamType}, пачка=[${teamString}]`);
                 } else {
                     const reasons = [];
                     if (!isMarkFree) reasons.push(`targetMark=${slotData.targetMarkingUserId}`);
@@ -403,6 +487,7 @@
                     if (!isReady) reasons.push(`status=${slotData.status}`);
                     if (!isNotAttackedToday) reasons.push(`атакован сегодня`);
                     skippedSlots.push({ slotId, defenderId, defenderName, reasons });
+                    logDebug(`⏭️ Слот #${slotId} (${defenderName}) пропущен: ${reasons.join(', ')}`);
                 }
             }
             
@@ -464,22 +549,40 @@
                 if (replayCache.has(replayId)) return replayCache.get(replayId);
                 try {
                     const replay = await Caller.send({ name: 'battleGetReplay', args: { id: replayId } });
+                    const result = { attackers: [], defenders: [] };
+                    
+                    const pastAttackers = replay?.replay?.attackers;
+                    if (pastAttackers) {
+                        let attackerList = [];
+                        if (Array.isArray(pastAttackers)) attackerList = pastAttackers;
+                        else if (typeof pastAttackers === 'object') attackerList = Object.values(pastAttackers);
+                        
+                        if (attackerList.length > 0) {
+                            const teamString = getTeamSignature(attackerList);
+                            const teamNames = getTeamNamesString(attackerList);
+                            if (teamString) result.attackers.push({ teamString, teamNames });
+                        }
+                    }
+                    
                     const pastDefenders = replay?.replay?.defenders;
-                    if (!pastDefenders || pastDefenders.length === 0) {
-                        replayCache.set(replayId, []);
-                        return [];
+                    if (pastDefenders && pastDefenders.length > 0) {
+                        for (const defTeam of pastDefenders) {
+                            const teamString = getTeamSignature(defTeam);
+                            const teamType = getTeamType(defTeam);
+                            const teamNames = getTeamNamesString(defTeam);
+                            if (teamString && teamType) result.defenders.push({ teamString, teamType, teamNames });
+                        }
                     }
-                    const defenderTeams = [];
-                    for (const defTeam of pastDefenders) {
-                        const teamString = getTeamSignature(defTeam);
-                        const teamType = getTeamType(defTeam);
-                        if (teamString && teamType) defenderTeams.push({ teamString, teamType });
+                    
+                    replayCache.set(replayId, result);
+                    logDebug(`📼 Реплей ${replayId}: атакующих пачек=${result.attackers.length}, защитных пачек=${result.defenders.length}`);
+                    for (const d of result.defenders) {
+                        logDebug(`   🛡️ [${d.teamType}] пачка=[${d.teamString}] → ${d.teamNames}`);
                     }
-                    replayCache.set(replayId, defenderTeams);
-                    return defenderTeams;
+                    return result;
                 } catch (e) {
                     logPanel(`Не удалось загрузить реплей ${replayId}`, 'warn');
-                    return [];
+                    return { attackers: [], defenders: [] };
                 }
             }
 
@@ -528,7 +631,7 @@
                     const memberWins = battles.filter(b => b.attackerId === member.id && isFullWin(b) && enemyUserIds.has(b.defenderId));
                     if (memberWins.length === 0) continue;
 
-                    logPanel(`📖 ${memberName}: ${memberWins.length} побед (день ${key})`, 'info');
+                    logDebug(`📖 ${memberName}: ${memberWins.length} побед (день ${key})`);
 
                     for (let i = memberWins.length - 1; i >= 0; i--) {
                         if (foundCount >= member.tries) break;
@@ -536,25 +639,58 @@
                         
                         const win = memberWins[i];
                         const defenderId = win.defenderId;
-                        if (foundDefenderSlots.has(defenderId)) continue;
+                        
+                        // 🔥 v4.17: Диагностика пропуска из-за уже назначенного защитника
+                        if (foundDefenderSlots.has(defenderId)) {
+                            logDebug(`⏭️ ${memberName}: защитник ${memberNames[defenderId] || defenderId} уже назначен ранее в этом запуске`);
+                            continue;
+                        }
 
-                        const pastDefenderTeams = await getReplayInfo(win.replayId);
-                        if (pastDefenderTeams.length === 0) continue;
+                        const replayInfo = await getReplayInfo(win.replayId);
+                        if (replayInfo.defenders.length === 0) {
+                            logDebug(`⏭️ Реплей ${win.replayId}: нет пачек защитников`);
+                            continue;
+                        }
+
+                        // 🔥 v4.17: Диагностика отсутствия защитника в свободных слотах
+                        const defenderFreeSlots = [...freeSlots.values()].filter(s => s.defenderId === defenderId);
+                        if (defenderFreeSlots.length === 0) {
+                            logDebug(`⏭️ ${memberName}: защитник ${memberNames[defenderId] || defenderId} не имеет свободных слотов`);
+                            continue;
+                        }
+                        logDebug(`🔍 ${memberName} → ${memberNames[defenderId] || defenderId}: проверяем ${defenderFreeSlots.length} слот(а/ов)`);
 
                         for (const [slotId, slot] of freeSlots.entries()) {
                             if (foundCount >= member.tries) break;
                             if (slot.defenderId !== defenderId) continue;
 
-                            const matchingTeam = pastDefenderTeams.find(pastTeam => pastTeam.teamType === slot.teamType && pastTeam.teamString === slot.teamString);
+                            // 🔥 v4.17: Расширенная диагностика сравнения пачек
+                            logDebug(`   🔎 Слот #${slotId} (${slot.defenderName}) [${slot.teamType}]:`);
+                            logDebug(`      Текущая пачка: [${slot.teamString}]`);
+
+                            const matchingTeam = replayInfo.defenders.find(
+                                pastTeam => pastTeam.teamType === slot.teamType && pastTeam.teamString === slot.teamString
+                            );
 
                             if (matchingTeam) {
+                                logDebug(`      ✅ СОВПАДЕНИЕ с пачкой из реплея [${matchingTeam.teamType}]`);
                                 logPanel(`✅ ${memberName} → #${slotId} (${slot.defenderName}) [${slot.teamType}] (${foundCount + 1}/${member.tries})`, 'success');
+                                
+                                if (replayInfo.attackers.length > 0) {
+                                    logTeamNames('   🗡️ Пачка атаки: ', replayInfo.attackers[0].teamNames || '(не удалось получить)');
+                                }
+                                logTeamNames('   🛡️ Текущая защита: ', slot.teamNames || '(не удалось получить)');
+                                
                                 try {
                                     const result = await Caller.send({ name: 'clanWarSetTargetMark', args: { userId: member.id, slotId: slot.slotId } });
                                     const isSuccess = result === null || result === undefined || !result.error;
 
                                     if (isSuccess) {
-                                        assigned.push({ memberId: member.id, memberName, slotId: slot.slotId, defenderId, defenderName: slot.defenderName, teamType: slot.teamType });
+                                        assigned.push({ 
+                                            memberId: member.id, memberName, slotId: slot.slotId, defenderId, 
+                                            defenderName: slot.defenderName, teamType: slot.teamType,
+                                            teamNames: slot.teamNames 
+                                        });
                                         freeSlots.delete(slotId);
                                         foundDefenderSlots.add(defenderId);
                                         foundCount++;
@@ -564,6 +700,16 @@
                                     }
                                 } catch (e) {
                                     logPanel(`❌ Ошибка назначения: ${e.message}`, 'error');
+                                }
+                            } else {
+                                // 🔥 v4.17: Диагностика причины несовпадения
+                                const sameTypeTeam = replayInfo.defenders.find(pastTeam => pastTeam.teamType === slot.teamType);
+                                if (sameTypeTeam) {
+                                    logDebug(`      ❌ Тип совпадает [${slot.teamType}], но пачка отличается:`);
+                                    logDebug(`         Реплей: [${sameTypeTeam.teamString}]`);
+                                } else {
+                                    const availableTypes = replayInfo.defenders.map(d => d.teamType).join(', ');
+                                    logDebug(`      ❌ В реплее нет пачки типа [${slot.teamType}]. Доступные типы: [${availableTypes}]`);
                                 }
                             }
                         }
@@ -584,7 +730,10 @@
             
             if (assigned.length > 0) {
                 logPanel('✅ Назначения:', 'success');
-                for (const a of assigned) logPanel(`  • ${a.memberName} → #${a.slotId} ${a.defenderName} [${a.teamType}]`, 'success');
+                for (const a of assigned) {
+                    logPanel(`  • ${a.memberName} → #${a.slotId} ${a.defenderName} [${a.teamType}]`, 'success');
+                    if (a.teamNames) logTeamNames('     🛡️ ', a.teamNames);
+                }
             }
             if (skipped.length > 0) {
                 logPanel('⚠️ Пропущено:', 'warn');
@@ -611,7 +760,7 @@
         const button = {
             hwhGuildAutoTarget: true,
             msg: '🎯 Авто-цели для гильдии',
-            title: 'Назначает по 1 цели на каждую попытку игрока. Панель закрывается через 5 сек.',
+            title: 'Назначает по 1 цели на каждую попытку. Расширенная диагностика в консоли (F12).',
             color: 'purple',
             async result() {
                 await sleep(300);
