@@ -23,7 +23,7 @@
 ## 📦 Установка
 
 1. Установите расширение для браузера: [Tampermonkey](https://www.tampermonkey.net/) или [Violentmonkey](https://violentmonkey.github.io/).
-2. Убедитесь, что у вас установлен и работает основной скрипт [HeroWarsHelper (HWH)](https://greasyfork.org/en/scripts/450693-herowarshelper).
+2. Убедитесь, что у вас установлен и работает основной скрипт [HeroWarsHelper (HWH)](https://greasyfork.org/ru/scripts/450693-herowarshelper).
 3. Нажмите на кнопку **"Raw"** или перейдите по прямой ссылке на скрипт:
    👉 [Установить HWHClanWarGuildAutoTarget](https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTarget.user.js)
 4. Подтвердите установку в открывшемся окне менеджера скрипات.
