@@ -2,9 +2,9 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.19
-// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Matches hero/titan types. Shows team names with pets in logs.
-// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны). В итогах показывает пачки с питомцами.
+// @version      4.21
+// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
+// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
 // @author       emz13666
 // @license      MIT
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyNGQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIxNC41IDE3LjUgMyA2IDMgMyA2IDMgMTcuNSAxNC41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSIxMyIgeTE9IjE5IiB4Mj0iMTkiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIxNiIgeTE9IjE2IiB4Mj0iMjAiIHkyPSIyMCI+PC9saW5lPjxsaW5lIHgxPSIxOSIgeTE9IjIxIiB4Mj0iMjEiIHkyPSIxOSI+PC9saW5lPjxwb2x5bGluZSBwb2ludHM9IjE0LjUgNi41IDE4IDMgMjEgMyAyMSA2IDE3LjUgOS41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSI1IiB5MT0iMTQiIHgyPSI5IiB5Mj0iMTgiPjwvbGluZT48bGluZSB4MT0iNyIgeTE9IjE3IiB4Mj0iMTEiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIzIiB5MT0iMTkiIHgyPSI1IiB5Mj0iMTciPjwvbGluZT48L3N2Zz4=
@@ -82,14 +82,14 @@
     function mergeAndSaveHistory(newData) {
         const history = loadHistory();
         let updated = false, newFullWins = 0, newFinishWins = 0;
-        
+
         for (const [key, battles] of Object.entries(newData)) {
             if (!history[key]) history[key] = [];
             const existingReplays = new Set(history[key].map(b => b.replayId));
-            
+
             for (const battle of battles) {
                 if (!battle.win || existingReplays.has(battle.replayId)) continue;
-                
+
                 if (battle.slotPoints === 20) {
                     history[key].push({
                         attackerId: String(battle.attackerId),
@@ -106,7 +106,7 @@
                 }
             }
         }
-        
+
         if (updated) saveHistory(history);
         if (newFullWins > 0 || newFinishWins > 0) {
             logPanel(`📥 Новых полных побед: ${newFullWins}, отфильтровано добивов: ${newFinishWins}`, 'info');
@@ -288,6 +288,40 @@
     }
 
     /* ================================================================ */
+    /* 🔥 v4.21: ОПРЕДЕЛЕНИЕ ЗДАНИЯ ПО НОМЕРУ СЛОТА И ЛИГЕ            */
+    /* ================================================================ */
+    function getSlotLocation(slotId, league) {
+        slotId = parseInt(slotId);
+        // league 1 = Gold, league 2 = Silver. Если не определено, предполагаем Gold для слотов > 30
+        const isGold = (league == 1) || (slotId > 30);
+
+        if (isGold) {
+            if (slotId >= 1 && slotId <= 3) return `Ак.Магов-${slotId}`;
+            if (slotId >= 4 && slotId <= 6) return `Маяк-${slotId - 3}`;
+            if (slotId >= 7 && slotId <= 9) return `Казармы-${slotId - 6}`;
+            if (slotId >= 10 && slotId <= 13) return `Мост-${slotId - 9}`;
+            if (slotId >= 14 && slotId <= 17) return `Источник-${slotId - 13}`;
+            if (slotId >= 18 && slotId <= 21) return `Литейная-${slotId - 17}`;
+            if (slotId >= 22 && slotId <= 25) return `Врата-${slotId - 21}`;
+            if (slotId >= 26 && slotId <= 29) return `Баст.Огня-${slotId - 25}`;
+            if (slotId >= 30 && slotId <= 33) return `Баст.Льда-${slotId - 29}`;
+            if (slotId >= 34 && slotId <= 40) return `Цитадель-${slotId - 33}`;
+        } else {
+            if (slotId >= 1 && slotId <= 2) return `Ак.Магов-${slotId}`;
+            if (slotId >= 3 && slotId <= 4) return `Маяк-${slotId - 2}`;
+            if (slotId >= 5 && slotId <= 6) return `Казармы-${slotId - 4}`;
+            if (slotId >= 7 && slotId <= 9) return `Мост-${slotId - 6}`;
+            if (slotId >= 10 && slotId <= 12) return `Источник-${slotId - 9}`;
+            if (slotId >= 13 && slotId <= 15) return `Литейная-${slotId - 12}`;
+            if (slotId >= 16 && slotId <= 18) return `Врата-${slotId - 15}`;
+            if (slotId >= 19 && slotId <= 21) return `Баст.Огня-${slotId - 18}`;
+            if (slotId >= 22 && slotId <= 24) return `Баст.Льда-${slotId - 21}`;
+            if (slotId >= 25 && slotId <= 30) return `Цитадель-${slotId - 24}`;
+        }
+        return `Слот-${slotId}`;
+    }
+
+    /* ================================================================ */
     /* 🔥 ПЕРЕВОД ID ГЕРОЕВ/ТИТАНОВ/ПИТОМЦЕВ В ИМЕНА                  */
     /* ================================================================ */
     const heroNameCache = new Map();
@@ -296,7 +330,7 @@
         if (!heroId) return '?';
         const id = String(heroId);
         if (heroNameCache.has(id)) return heroNameCache.get(id);
-        
+
         let name = null;
         try {
             if (typeof cheats !== 'undefined' && typeof cheats.translate === 'function') {
@@ -306,7 +340,7 @@
                 }
             }
         } catch (e) { /* ignore */ }
-        
+
         if (!name) {
             try {
                 if (typeof lib !== 'undefined' && lib.data?.hero?.[id]) {
@@ -320,9 +354,9 @@
                 }
             } catch (e) { /* ignore */ }
         }
-        
+
         if (!name) name = `ID:${id}`;
-        
+
         heroNameCache.set(id, name);
         return name;
     }
@@ -335,11 +369,11 @@
         } else if (typeof team === 'object') {
             units = Object.values(team).map(h => ({ id: h.id, petId: h.petId })).filter(u => u.id);
         }
-        
+
         if (units.length === 0) return '';
-        
+
         units.sort((a, b) => a.id - b.id);
-        
+
         return units.map(u => {
             const name = getHeroName(u.id);
             if (u.petId) {
@@ -408,6 +442,7 @@
             const clanTries = cwInfo.clanTries || {};
             const currentSeason = cwInfo.season;
             const currentDay = cwInfo.day;
+            const league = cwInfo.league || 1; // 🔥 v4.21: Определяем лигу для маппинга зданий
 
             const memberNames = {};
             if (cwInfo.ourSlots) for (const s of Object.values(cwInfo.ourSlots)) if (s.user) memberNames[s.user.id] = s.user.name;
@@ -415,7 +450,7 @@
             if (cwInfo.enemyClanMembers) for (const m of Object.values(cwInfo.enemyClanMembers)) memberNames[m.id] = m.name;
             for (const s of Object.values(enemySlots)) if (s.user) memberNames[s.user.id] = s.user.name;
 
-            logPanel(`📊 Сезон/День: ${currentSeason}/${currentDay}, мои попытки: ${cwInfo.myTries}`, 'info');
+            logPanel(`📊 Сезон/День: ${currentSeason}/${currentDay}, Лига: ${league == 1 ? 'Золотая' : 'Серебряная'}, попытки: ${cwInfo.myTries}`, 'info');
 
             const guildMembers = [];
             let totalTries = 0;
@@ -484,11 +519,13 @@
                     const teamString = getTeamSignature(teamObj);
                     const teamType = getTeamType(teamObj);
                     const teamNames = getTeamNamesString(teamObj);
-                    freeSlots.set(parseInt(slotId), { 
-                        slotId: parseInt(slotId), defenderId, teamString, teamType, 
-                        defenderName, teamNames 
+                    const slotLocation = getSlotLocation(slotId, league); // 🔥 v4.21
+
+                    freeSlots.set(parseInt(slotId), {
+                        slotId: parseInt(slotId), defenderId, teamString, teamType,
+                        defenderName, teamNames, slotLocation
                     });
-                    logDebug(`✅ Свободный слот #${slotId} (${defenderName}): тип=${teamType}, пачка=[${teamString}]`);
+                    logDebug(`✅ Свободный слот ${slotLocation} (${defenderName}): тип=${teamType}, пачка=[${teamString}]`);
                 } else {
                     const reasons = [];
                     if (!isMarkFree) reasons.push(`targetMark=${slotData.targetMarkingUserId}`);
@@ -496,14 +533,16 @@
                     if (!isReady) reasons.push(`status=${slotData.status}`);
                     if (!isNotAttackedToday) reasons.push(`атакован сегодня`);
                     skippedSlots.push({ slotId, defenderId, defenderName, reasons });
-                    logDebug(`⏭️ Слот #${slotId} (${defenderName}) пропущен: ${reasons.join(', ')}`);
+                    logDebug(`⏭️ Слот ${getSlotLocation(slotId, league)} (${defenderName}) пропущен: ${reasons.join(', ')}`);
                 }
             }
-            
+
             logPanel(`🎯 ${freeSlots.size} свободных слотов (пропущено ${skippedSlots.length})`, 'info');
             if (skippedSlots.length > 0) {
                 logPanel('⏭️ Пропущенные слоты:', 'warn');
-                for (const s of skippedSlots) logPanel(`  • #${s.slotId} ${s.defenderName}: ${s.reasons.join(', ')}`, 'warn');
+                for (const s of skippedSlots) {
+                    logPanel(`  • ${getSlotLocation(s.slotId, league)} ${s.defenderName}: ${s.reasons.join(', ')}`, 'warn');
+                }
             }
 
             if (freeSlots.size === 0) {
@@ -559,20 +598,20 @@
                 try {
                     const replay = await Caller.send({ name: 'battleGetReplay', args: { id: replayId } });
                     const result = { attackers: [], defenders: [] };
-                    
+
                     const pastAttackers = replay?.replay?.attackers;
                     if (pastAttackers) {
                         let attackerList = [];
                         if (Array.isArray(pastAttackers)) attackerList = pastAttackers;
                         else if (typeof pastAttackers === 'object') attackerList = Object.values(pastAttackers);
-                        
+
                         if (attackerList.length > 0) {
                             const teamString = getTeamSignature(attackerList);
                             const teamNames = getTeamNamesString(attackerList);
                             if (teamString) result.attackers.push({ teamString, teamNames });
                         }
                     }
-                    
+
                     const pastDefenders = replay?.replay?.defenders;
                     if (pastDefenders && pastDefenders.length > 0) {
                         for (const defTeam of pastDefenders) {
@@ -582,7 +621,7 @@
                             if (teamString && teamType) result.defenders.push({ teamString, teamType, teamNames });
                         }
                     }
-                    
+
                     replayCache.set(replayId, result);
                     logDebug(`📼 Реплей ${replayId}: атакующих пачек=${result.attackers.length}, защитных пачек=${result.defenders.length}`);
                     for (const d of result.defenders) {
@@ -619,7 +658,7 @@
                         }
                     }
                 }
-                
+
                 if (defendersWithWins.size > 0) {
                     const namesList = [...defendersWithWins].map(id => memberNames[id] || id).join(', ');
                     logPanel(`📚 ${memberName} (${member.tries} попыт.): победы в базе против: ${namesList}`, 'info');
@@ -633,7 +672,7 @@
                 for (const key of historyKeys) {
                     if (foundCount >= member.tries) break;
                     if (freeSlots.size === 0) break;
-                    
+
                     const battles = mergedHistory[key];
                     if (!battles) continue;
 
@@ -645,10 +684,10 @@
                     for (let i = memberWins.length - 1; i >= 0; i--) {
                         if (foundCount >= member.tries) break;
                         if (freeSlots.size === 0) break;
-                        
+
                         const win = memberWins[i];
                         const defenderId = win.defenderId;
-                        
+
                         if (foundDefenderSlots.has(defenderId)) {
                             logDebug(`⏭️ ${memberName}: защитник ${memberNames[defenderId] || defenderId} уже назначен ранее в этом запуске`);
                             continue;
@@ -671,7 +710,7 @@
                             if (foundCount >= member.tries) break;
                             if (slot.defenderId !== defenderId) continue;
 
-                            logDebug(`   🔎 Слот #${slotId} (${slot.defenderName}) [${slot.teamType}]:`);
+                            logDebug(`   🔎 Слот ${slot.slotLocation} (${slot.defenderName}) [${slot.teamType}]:`);
                             logDebug(`      Текущая пачка: [${slot.teamString}]`);
 
                             const matchingTeam = replayInfo.defenders.find(
@@ -680,20 +719,24 @@
 
                             if (matchingTeam) {
                                 logDebug(`      ✅ СОВПАДЕНИЕ с пачкой из реплея [${matchingTeam.teamType}]`);
-                                logPanel(`✅ ${memberName} → #${slotId} (${slot.defenderName}) [${slot.teamType}] (${foundCount + 1}/${member.tries})`, 'success');
-                                
+
+                                // 🔥 v4.21: Формат вывода без номера слота и [hero]/[titan]
+                                logPanel(`✅ ${memberName} → ${slot.slotLocation}: ${slot.defenderName} (${foundCount + 1}/${member.tries})`, 'success');
+
                                 const attackerNames = replayInfo.attackers.length > 0 ? replayInfo.attackers[0].teamNames : '';
+                                const defenderNamesWithPets = matchingTeam.teamNames;
 
                                 try {
                                     const result = await Caller.send({ name: 'clanWarSetTargetMark', args: { userId: member.id, slotId: slot.slotId } });
                                     const isSuccess = result === null || result === undefined || !result.error;
 
                                     if (isSuccess) {
-                                        assigned.push({ 
-                                            memberId: member.id, memberName, slotId: slot.slotId, defenderId, 
-                                            defenderName: slot.defenderName, teamType: slot.teamType,
-                                            teamNames: slot.teamNames,
-                                            attackerNames: attackerNames
+                                        assigned.push({
+                                            memberId: member.id, memberName, slotId: slot.slotId, defenderId,
+                                            defenderName: slot.defenderName,
+                                            teamNames: defenderNamesWithPets,
+                                            attackerNames: attackerNames,
+                                            slotLocation: slot.slotLocation
                                         });
                                         freeSlots.delete(slotId);
                                         foundDefenderSlots.add(defenderId);
@@ -730,12 +773,12 @@
             setProgress(100);
             logPanel('━'.repeat(30), 'info');
             logPanel(`🏁 ИТОГО: Назначено ${assigned.length} целей, пропущено ${skipped.length} игроков`, 'highlight');
-            
+
             if (assigned.length > 0) {
                 logPanel('✅ Назначения:', 'success');
                 for (const a of assigned) {
-                    logPanel(`  • ${a.memberName} → #${a.slotId} ${a.defenderName} [${a.teamType}]`, 'success');
-                    // 🔥 v4.19: Убраны слова "Атака:" и "Защита:", оставлены только эмодзи
+                    // 🔥 v4.21: Формат итогового отчёта: Имя → Здание-Позиция: Защитник
+                    logPanel(`  • ${a.memberName} → ${a.slotLocation}: ${a.defenderName}`, 'success');
                     if (a.attackerNames) logTeamNames('     ⚔️', a.attackerNames);
                     if (a.teamNames) logTeamNames('     🛡️ ', a.teamNames);
                 }
@@ -765,7 +808,7 @@
         const button = {
             hwhGuildAutoTarget: true,
             msg: '🎯 Авто-цели для гильдии',
-            title: 'Назначает по 1 цели на каждую попытку. Показывает пачки с питомцами в итогах.',
+            title: 'Назначает по 1 цели на каждую попытку. Показывает названия зданий и пачки с питомцами.',
             color: 'purple',
             async result() {
                 await sleep(300);
