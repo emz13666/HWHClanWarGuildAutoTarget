@@ -2,9 +2,9 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.17
-// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Matches hero/titan types. Shows team names in logs.
-// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны). В логах показывает имена героев/титанов.
+// @version      4.19
+// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Matches hero/titan types. Shows team names with pets in logs.
+// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). Учитывает типы пачек (герои/титаны). В итогах показывает пачки с питомцами.
 // @author       emz13666
 // @license      MIT
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyNGQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIxNC41IDE3LjUgMyA2IDMgMyA2IDMgMTcuNSAxNC41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSIxMyIgeTE9IjE5IiB4Mj0iMTkiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIxNiIgeTE9IjE2IiB4Mj0iMjAiIHkyPSIyMCI+PC9saW5lPjxsaW5lIHgxPSIxOSIgeTE9IjIxIiB4Mj0iMjEiIHkyPSIxOSI+PC9saW5lPjxwb2x5bGluZSBwb2ludHM9IjE0LjUgNi41IDE4IDMgMjEgMyAyMSA2IDE3LjUgOS41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSI1IiB5MT0iMTQiIHgyPSI5IiB5Mj0iMTgiPjwvbGluZT48bGluZSB4MT0iNyIgeTE9IjE3IiB4Mj0iMTEiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIzIiB5MT0iMTkiIHgyPSI1IiB5Mj0iMTciPjwvbGluZT48L3N2Zz4=
@@ -23,7 +23,7 @@
     const STORAGE_KEY = 'HWH_CW_History_Log_v1';
     const MAX_HISTORY_DAYS = 90;
     const AUTO_CLOSE_DELAY_MS = 5000;
-    const DEBUG_MODE = true; // 🔥 v4.17: Включить расширенную диагностику в консоль (F12)
+    const DEBUG_MODE = true;
 
     /* ================================================================ */
     /* 🔥 ОЖИДАНИЕ ЗАГРУЗКИ HWH                                       */
@@ -134,7 +134,7 @@
             const style = document.createElement('style');
             style.id = 'hwh-cw-panel-style';
             style.textContent = `
-                .hwh-cw-panel { position: fixed; top: 20px; right: 20px; width: 420px; max-height: 70vh; background: rgba(30, 25, 18, 0.95); border: 2px solid #8a6d3b; border-radius: 8px; color: #f3e3bd; font-family: Arial, sans-serif; font-size: 12px; z-index: 2147483000; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column; pointer-events: auto; }
+                .hwh-cw-panel { position: fixed; top: 20px; right: 20px; width: 450px; max-height: 70vh; background: rgba(30, 25, 18, 0.95); border: 2px solid #8a6d3b; border-radius: 8px; color: #f3e3bd; font-family: Arial, sans-serif; font-size: 12px; z-index: 2147483000; box-shadow: 0 4px 20px rgba(0,0,0,0.5); display: flex; flex-direction: column; pointer-events: auto; }
                 .hwh-cw-panel.minimized { max-height: 36px; overflow: hidden; }
                 .hwh-cw-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: #3d2e1a; border-bottom: 1px solid #8a6d3b; border-radius: 6px 6px 0 0; cursor: move; user-select: none; }
                 .hwh-cw-panel-title { font-weight: bold; font-size: 13px; color: #ffd24d; }
@@ -236,7 +236,6 @@
         document.addEventListener('mouseup', () => { isDragging = false; handle.style.cursor = 'move'; });
     }
 
-    // 🔥 v4.17: Лог в панель И в консоль (важные сообщения)
     function logPanel(message, type = 'info') {
         const consoleMethod = type === 'error' ? console.error : type === 'warn' ? console.warn : console.log;
         consoleMethod(`[HWH CW Auto] ${message}`);
@@ -249,7 +248,6 @@
         panelLog.scrollTop = panelLog.scrollHeight;
     }
 
-    // 🔥 v4.17: Лог ТОЛЬКО в консоль (расширенная диагностика)
     function logDebug(message, ...args) {
         if (!DEBUG_MODE) return;
         if (args.length > 0) {
@@ -290,7 +288,7 @@
     }
 
     /* ================================================================ */
-    /* 🔥 ПЕРЕВОД ID ГЕРОЕВ/ТИТАНОВ В ИМЕНА                           */
+    /* 🔥 ПЕРЕВОД ID ГЕРОЕВ/ТИТАНОВ/ПИТОМЦЕВ В ИМЕНА                  */
     /* ================================================================ */
     const heroNameCache = new Map();
 
@@ -331,14 +329,25 @@
 
     function getTeamNamesString(team) {
         if (!team) return '';
-        let ids = [];
-        if (Array.isArray(team)) ids = team.map(h => h.id).filter(id => id);
-        else if (typeof team === 'object') ids = Object.values(team).map(h => h.id).filter(id => id);
+        let units = [];
+        if (Array.isArray(team)) {
+            units = team.map(h => ({ id: h.id, petId: h.petId })).filter(u => u.id);
+        } else if (typeof team === 'object') {
+            units = Object.values(team).map(h => ({ id: h.id, petId: h.petId })).filter(u => u.id);
+        }
         
-        if (ids.length === 0) return '';
+        if (units.length === 0) return '';
         
-        ids.sort((a, b) => a - b);
-        return ids.map(id => getHeroName(id)).join(', ');
+        units.sort((a, b) => a.id - b.id);
+        
+        return units.map(u => {
+            const name = getHeroName(u.id);
+            if (u.petId) {
+                const petName = getHeroName(u.petId);
+                return `${name} (${petName})`;
+            }
+            return name;
+        }).join(', ');
     }
 
     /* ================================================================ */
@@ -640,7 +649,6 @@
                         const win = memberWins[i];
                         const defenderId = win.defenderId;
                         
-                        // 🔥 v4.17: Диагностика пропуска из-за уже назначенного защитника
                         if (foundDefenderSlots.has(defenderId)) {
                             logDebug(`⏭️ ${memberName}: защитник ${memberNames[defenderId] || defenderId} уже назначен ранее в этом запуске`);
                             continue;
@@ -652,7 +660,6 @@
                             continue;
                         }
 
-                        // 🔥 v4.17: Диагностика отсутствия защитника в свободных слотах
                         const defenderFreeSlots = [...freeSlots.values()].filter(s => s.defenderId === defenderId);
                         if (defenderFreeSlots.length === 0) {
                             logDebug(`⏭️ ${memberName}: защитник ${memberNames[defenderId] || defenderId} не имеет свободных слотов`);
@@ -664,7 +671,6 @@
                             if (foundCount >= member.tries) break;
                             if (slot.defenderId !== defenderId) continue;
 
-                            // 🔥 v4.17: Расширенная диагностика сравнения пачек
                             logDebug(`   🔎 Слот #${slotId} (${slot.defenderName}) [${slot.teamType}]:`);
                             logDebug(`      Текущая пачка: [${slot.teamString}]`);
 
@@ -676,11 +682,8 @@
                                 logDebug(`      ✅ СОВПАДЕНИЕ с пачкой из реплея [${matchingTeam.teamType}]`);
                                 logPanel(`✅ ${memberName} → #${slotId} (${slot.defenderName}) [${slot.teamType}] (${foundCount + 1}/${member.tries})`, 'success');
                                 
-                                if (replayInfo.attackers.length > 0) {
-                                    logTeamNames('   🗡️ Пачка атаки: ', replayInfo.attackers[0].teamNames || '(не удалось получить)');
-                                }
-                                logTeamNames('   🛡️ Текущая защита: ', slot.teamNames || '(не удалось получить)');
-                                
+                                const attackerNames = replayInfo.attackers.length > 0 ? replayInfo.attackers[0].teamNames : '';
+
                                 try {
                                     const result = await Caller.send({ name: 'clanWarSetTargetMark', args: { userId: member.id, slotId: slot.slotId } });
                                     const isSuccess = result === null || result === undefined || !result.error;
@@ -689,7 +692,8 @@
                                         assigned.push({ 
                                             memberId: member.id, memberName, slotId: slot.slotId, defenderId, 
                                             defenderName: slot.defenderName, teamType: slot.teamType,
-                                            teamNames: slot.teamNames 
+                                            teamNames: slot.teamNames,
+                                            attackerNames: attackerNames
                                         });
                                         freeSlots.delete(slotId);
                                         foundDefenderSlots.add(defenderId);
@@ -702,7 +706,6 @@
                                     logPanel(`❌ Ошибка назначения: ${e.message}`, 'error');
                                 }
                             } else {
-                                // 🔥 v4.17: Диагностика причины несовпадения
                                 const sameTypeTeam = replayInfo.defenders.find(pastTeam => pastTeam.teamType === slot.teamType);
                                 if (sameTypeTeam) {
                                     logDebug(`      ❌ Тип совпадает [${slot.teamType}], но пачка отличается:`);
@@ -732,6 +735,8 @@
                 logPanel('✅ Назначения:', 'success');
                 for (const a of assigned) {
                     logPanel(`  • ${a.memberName} → #${a.slotId} ${a.defenderName} [${a.teamType}]`, 'success');
+                    // 🔥 v4.19: Убраны слова "Атака:" и "Защита:", оставлены только эмодзи
+                    if (a.attackerNames) logTeamNames('     ⚔️', a.attackerNames);
                     if (a.teamNames) logTeamNames('     🛡️ ', a.teamNames);
                 }
             }
@@ -760,7 +765,7 @@
         const button = {
             hwhGuildAutoTarget: true,
             msg: '🎯 Авто-цели для гильдии',
-            title: 'Назначает по 1 цели на каждую попытку. Расширенная диагностика в консоли (F12).',
+            title: 'Назначает по 1 цели на каждую попытку. Показывает пачки с питомцами в итогах.',
             color: 'purple',
             async result() {
                 await sleep(300);
