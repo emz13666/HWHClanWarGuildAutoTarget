@@ -1,4 +1,4 @@
-# 🎯 HWHClanWarGuildAutoTarget (v4.28)
+# 🎯 HWHClanWarGuildAutoTarget
 
 Автоматическое назначение целей в Войне Гильдий (Clan War) для всех членов гильдии на основе истории прошлых побед.
 
