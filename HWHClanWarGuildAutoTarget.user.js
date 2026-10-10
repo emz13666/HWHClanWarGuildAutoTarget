@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.24
+// @version      4.28
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
 // @author       emz13666
@@ -22,6 +22,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
  const MAX_HISTORY_DAYS = 90;
  const AUTO_CLOSE_DELAY_MS = 5000;
  const DEBUG_MODE = true;
+ const LOCALSTORAGE_LIMIT_MB = 5;
  /* ================================================================ */
  /* 🔥 ОЖИДАНИЕ ЗАГРУЗКИ HWH                                       */
  /* ================================================================ */
@@ -48,6 +49,53 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
      console.warn('[HWHClanWarGuildAutoTarget] Не удалось зарегистрировать расширение в HWH:', e);
  }
  /* ================================================================ */
+ /* 📊 ПРОВЕРКА ОБЪЁМА LOCALSTORAGE                                 */
+ /* ================================================================ */
+ function checkStorageSize() {
+     try {
+         let totalBytes = 0;
+         let historyBytes = 0;
+         let historyChars = 0;
+         let keysCount = 0;
+         for (let i = 0; i < localStorage.length; i++) {
+             const key = localStorage.key(i);
+             const value = localStorage.getItem(key) || '';
+             const bytes = value.length * 2;
+             totalBytes += bytes;
+             keysCount++;
+             if (key === STORAGE_KEY) {
+                 historyBytes = bytes;
+                 historyChars = value.length;
+             }
+         }
+         const limitBytes = LOCALSTORAGE_LIMIT_MB * 1024 * 1024;
+         const freeBytes = Math.max(0, limitBytes - totalBytes);
+         const formatBytes = (b) => {
+             if (b < 1024) return b + ' Б';
+             if (b < 1024 * 1024) return (b / 1024).toFixed(2) + ' КБ';
+             return (b / (1024 * 1024)).toFixed(2) + ' МБ';
+         };
+         const percentUsed = ((totalBytes / limitBytes) * 100).toFixed(2);
+         const historyPercent = historyBytes > 0 ? ((historyBytes / totalBytes) * 100).toFixed(2) : '0.00';
+         console.group(`%c[HWH CW Auto] 📊 Состояние localStorage`, 'color: #ffd24d; font-weight: bold');
+         console.log(`%c🗄️ История ВГ (ключ "${STORAGE_KEY}"):`, 'color: #7fff7f');
+         console.log(`   • Символов : ${historyChars.toLocaleString('ru-RU')}`);
+         console.log(`   • Размер   : ${formatBytes(historyBytes)}`);
+         console.log(`   • Доля     : ${historyPercent}% от всего localStorage`);
+         console.log(`%c📦 Общий объём localStorage:`, 'color: #b8d4e3');
+         console.log(`   • Ключей   : ${keysCount}`);
+         console.log(`   • Занято   : ${formatBytes(totalBytes)} (${percentUsed}%)`);
+         console.log(`   • Свободно : ${formatBytes(freeBytes)} из ${formatBytes(limitBytes)}`);
+         if (totalBytes / limitBytes > 0.8) {
+             console.warn(`%c⚠️ Внимание: хранилище заполнено более чем на 80%!`, 'color: #ffd24d; font-weight: bold');
+         }
+         console.groupEnd();
+     } catch (e) {
+         console.error('[HWH CW Auto] Ошибка при проверке localStorage:', e);
+     }
+ }
+ checkStorageSize();
+ /* ================================================================ */
  /* 🗄️ РАБОТА С ЛОКАЛЬНОЙ БАЗОЙ ИСТОРИИ                            */
  /* ================================================================ */
  function loadHistory() {
@@ -70,33 +118,56 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
      if (battle.slotPoints === undefined || battle.slotPoints === null) return true;
      return battle.slotPoints === 20;
  }
+ /* 🔥 v4.28: Проверка "пустого" боя по replayId (0 = незащищённая позиция) */
+ function isEmptyBattle(battle) {
+     const replayId = String(battle?.replayId ?? '');
+     return replayId === '0' || replayId === '';
+ }
  function mergeAndSaveHistory(newData) {
      const history = loadHistory();
-     let updated = false, newFullWins = 0, newFinishWins = 0;
+     let updated = false, newBattles = 0, skippedDuplicates = 0, skippedEmpty = 0, skippedEmptyDays = 0;
      for (const [key, battles] of Object.entries(newData)) {
-         if (!history[key]) history[key] = [];
-         const existingReplays = new Set(history[key].map(b => b.replayId));
+         /* 🔥 v4.28: Сначала собираем только валидные новые бои для этого дня */
+         const validNewBattles = [];
+         const existingReplays = new Set((history[key] || []).map(b => b.replayId));
          for (const battle of battles) {
-             if (!battle.win || existingReplays.has(battle.replayId)) continue;
-             if (battle.slotPoints === 20) {
-                 history[key].push({
-                     attackerId: String(battle.attackerId),
-                     defenderId: String(battle.defenderId),
-                     replayId: battle.replayId,
-                     win: true,
-                     slotPoints: 20,
-                     time: battle.time
-                 });
-                 newFullWins++;
-                 updated = true;
-             } else {
-                 newFinishWins++;
+             if (isEmptyBattle(battle)) {
+                 skippedEmpty++;
+                 continue;
              }
+             if (existingReplays.has(battle.replayId)) {
+                 skippedDuplicates++;
+                 continue;
+             }
+             validNewBattles.push({
+                 attackerId: String(battle.attackerId),
+                 defenderId: String(battle.defenderId),
+                 replayId: battle.replayId,
+                 win: battle.win,
+                 slotPoints: battle.slotPoints,
+                 time: battle.time
+             });
+             existingReplays.add(battle.replayId);
          }
+         /* 🔥 v4.28: Если в дне нет ни одного валидного боя — ключ не создаём */
+         if (validNewBattles.length === 0) {
+             if (!history[key] || history[key].length === 0) {
+                 skippedEmptyDays++;
+             }
+             continue;
+         }
+         if (!history[key]) history[key] = [];
+         history[key].push(...validNewBattles);
+         newBattles += validNewBattles.length;
+         updated = true;
      }
      if (updated) saveHistory(history);
-     if (newFullWins > 0 || newFinishWins > 0) {
-         logPanel(`📥 Новых полных побед: ${newFullWins}, отфильтровано добивов: ${newFinishWins}`, 'info');
+     if (newBattles > 0 || skippedDuplicates > 0 || skippedEmpty > 0) {
+         let msg = `📥 Новых боёв: ${newBattles}`;
+         if (skippedDuplicates > 0) msg += `, дубликатов: ${skippedDuplicates}`;
+         if (skippedEmpty > 0) msg += `, пустых: ${skippedEmpty}`;
+         if (skippedEmptyDays > 0) msg += `, пропущено пустых дней: ${skippedEmptyDays}`;
+         logPanel(msg, 'info');
      }
      return history;
  }
@@ -142,6 +213,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
                  throw new Error('Неверный формат: ожидается JSON-объект');
              }
              let validEntries = 0;
+             let skippedEmpty = 0;
              for (const [key, value] of Object.entries(data)) {
                  if (!Array.isArray(value)) {
                      throw new Error(`Неверный формат данных в ключе: ${key}`);
@@ -151,17 +223,29 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
              const existing = loadHistory();
              const merged = { ...existing };
              for (const [key, battles] of Object.entries(data)) {
-                 if (!merged[key]) merged[key] = [];
-                 const existingReplays = new Set(merged[key].map(b => b.replayId));
+                 /* 🔥 v4.28: При импорте также фильтруем пустые бои */
+                 const validNewBattles = [];
+                 const existingReplays = new Set((merged[key] || []).map(b => b.replayId));
                  for (const b of battles) {
+                     if (isEmptyBattle(b)) {
+                         skippedEmpty++;
+                         continue;
+                     }
                      if (b && b.replayId && !existingReplays.has(b.replayId)) {
-                         merged[key].push(b);
+                         validNewBattles.push(b);
                          existingReplays.add(b.replayId);
                      }
                  }
+                 /* 🔥 v4.28: Если в дне нет валидных боёв — ключ не создаём */
+                 if (validNewBattles.length === 0) continue;
+                 if (!merged[key]) merged[key] = [];
+                 merged[key].push(...validNewBattles);
              }
              saveHistory(merged);
-             logPanel(`📥 История импортирована из "${file.name}": ${validEntries} дней`, 'success');
+             let msg = `📥 История импортирована из "${file.name}": ${validEntries} дней`;
+             if (skippedEmpty > 0) msg += `, пропущено пустых боёв: ${skippedEmpty}`;
+             logPanel(msg, 'success');
+             checkStorageSize();
          } catch (err) {
              logPanel('❌ Ошибка импорта: ' + err.message, 'error');
          } finally {
@@ -341,7 +425,6 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
  /* ================================================================ */
  function getSlotLocation(slotId, league) {
      slotId = parseInt(slotId);
-     // league 1 = Gold, league 2 = Silver. Если не определено, предполагаем Gold для слотов > 30
      const isGold = (league == 1) || (slotId > 30);
      if (isGold) {
          if (slotId >= 1 && slotId <= 3) return `Ак.Магов-${slotId}`;
@@ -450,7 +533,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
      createPanel();
      panelLog.innerHTML = '';
      cancelAutoClose();
-     setPanelTitle('🎯 Авто-цели ВГ: запуск...');
+     setPanelTitle(`🎯 Авто-цели ВГ v${GM_info.script.version}: запуск...`);
      setProgress(0);
      if (DEBUG_MODE) {
          logDebug('🔧 DEBUG_MODE включён. Расширенные логи выводятся в консоль (F12).');
@@ -461,18 +544,68 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
              scheduleAutoClose();
              return;
          }
+         /* ============================================================ */
+         /* ЭТАП 1: СБОР ИСТОРИИ (всегда, независимо от активности ВГ) */
+         /* ============================================================ */
+         logPanel('📜 Обновление базы истории боёв...', 'info');
+         setProgress(5);
+         let mergedHistory = loadHistory();
+         let historyKeys = Object.keys(mergedHistory).sort().reverse();
+         try {
+             const historyList = await Caller.send('clanWarGetAvailableHistory');
+             if (historyList?.history?.length) {
+                 const newDataToMerge = {};
+                 let loadedDays = 0;
+                 for (const hist of historyList.history) {
+                     try {
+                         const dayHistory = await Caller.send({
+                             name: 'clanWarGetDayHistory',
+                             args: { season: parseInt(hist.season), day: parseInt(hist.day) }
+                         });
+                         if (dayHistory?.attack) newDataToMerge[`${hist.season}_${hist.day}`] = dayHistory.attack;
+                         loadedDays++;
+                         setProgress(5 + (loadedDays / historyList.history.length) * 25);
+                         await sleep(100);
+                     } catch (e) {
+                         logPanel(`Не удалось загрузить день ${hist.season}_${hist.day}`, 'warn');
+                     }
+                 }
+                 mergedHistory = mergeAndSaveHistory(newDataToMerge);
+                 historyKeys = Object.keys(mergedHistory).sort().reverse();
+             } else {
+                 logPanel('⚠️ История боёв от сервера пуста.', 'warn');
+             }
+         } catch (e) {
+             logPanel('⚠️ Не удалось загрузить историю: ' + e.message, 'warn');
+         }
+         let totalBattles = 0, totalFullWins = 0;
+         for (const key of historyKeys) {
+             for (const b of (mergedHistory[key] || [])) {
+                 totalBattles++;
+                 if (isFullWin(b)) totalFullWins++;
+             }
+         }
+         logPanel(`📚 В базе ${historyKeys.length} дней, ${totalBattles} боёв (${totalFullWins} полных побед)`, 'info');
+         /* ============================================================ */
+         /* ЭТАП 2: ПРОВЕРКА АКТИВНОСТИ ВГ                             */
+         /* ============================================================ */
          logPanel('📡 Запрос clanWarGetInfo...', 'info');
+         setProgress(32);
          const cwInfo = await Caller.send('clanWarGetInfo');
          if (!cwInfo || !cwInfo.enemySlots) {
-             logPanel('⚠️ Война Гильдий не активна.', 'warn');
+             logPanel('⚠️ Война Гильдий не активна. База истории обновлена.', 'warn');
+             checkStorageSize();
              scheduleAutoClose();
              return;
          }
+         /* ============================================================ */
+         /* ЭТАП 3: ОСНОВНАЯ ЛОГИКА НАЗНАЧЕНИЯ ЦЕЛЕЙ                   */
+         /* ============================================================ */
          const enemySlots = cwInfo.enemySlots;
          const clanTries = cwInfo.clanTries || {};
          const currentSeason = cwInfo.season;
          const currentDay = cwInfo.day;
-         const league = cwInfo.league || 1; // 🔥 v4.21: Определяем лигу для маппинга зданий
+         const league = cwInfo.league || 1;
          const memberNames = {};
          if (cwInfo.ourSlots) for (const s of Object.values(cwInfo.ourSlots)) if (s.user) memberNames[s.user.id] = s.user.name;
          if (cwInfo.ourClanMembers) for (const m of Object.values(cwInfo.ourClanMembers)) memberNames[m.id] = m.name;
@@ -497,6 +630,13 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
              if (slot.user?.id) enemyUserIds.add(String(slot.user.id));
          }
          logPanel(`👥 ${enemyUserIds.size} вражеских игроков в текущей войне`, 'info');
+         let totalWinsVsCurrentGuild = 0;
+         for (const key of historyKeys) {
+             for (const b of (mergedHistory[key] || [])) {
+                 if (isFullWin(b) && enemyUserIds.has(b.defenderId)) totalWinsVsCurrentGuild++;
+             }
+         }
+         logPanel(`📚 Полных побед в базе против текущей гильдии: ${totalWinsVsCurrentGuild}. Ищем цели...`, 'highlight');
          logPanel('🛡️ Проверка журнала текущего дня...', 'info');
          const alreadyAttackedToday = new Set();
          try {
@@ -535,7 +675,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
                  const teamString = getTeamSignature(teamObj);
                  const teamType = getTeamType(teamObj);
                  const teamNames = getTeamNamesString(teamObj);
-                 const slotLocation = getSlotLocation(slotId, league); // 🔥 v4.21
+                 const slotLocation = getSlotLocation(slotId, league);
                  freeSlots.set(parseInt(slotId), {
                      slotId: parseInt(slotId), defenderId, teamString, teamType,
                      defenderName, teamNames, slotLocation
@@ -558,50 +698,15 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
                  logPanel(`  • ${getSlotLocation(s.slotId, league)} ${s.defenderName}: ${s.reasons.join(', ')}`, 'warn');
              }
          }
-         logPanel('📜 Запрос clanWarGetAvailableHistory...', 'info');
-         setProgress(10);
-         const historyList = await Caller.send('clanWarGetAvailableHistory');
-         if (!historyList?.history?.length) {
-             logPanel('⚠️ История боёв пуста.', 'warn');
-             scheduleAutoClose();
-             return;
-         }
-         const recentHistory = historyList.history.filter(hist =>!(parseInt(hist.season) === parseInt(currentSeason) && parseInt(hist.day) === parseInt(currentDay)));
-         const newDataToMerge = {};
-         let loadedDays = 0;
-         for (const hist of recentHistory) {
-             try {
-                 const dayHistory = await Caller.send({
-                     name: 'clanWarGetDayHistory',
-                     args: { season: parseInt(hist.season), day: parseInt(hist.day) }
-                 });
-                 if (dayHistory?.attack) newDataToMerge[`${hist.season}_${hist.day}`] = dayHistory.attack;
-                 loadedDays++;
-                 setProgress(10 + (loadedDays / recentHistory.length) * 20);
-                 await sleep(100);
-             } catch (e) {
-                 logPanel(`Не удалось загрузить день ${hist.season}_${hist.day}`, 'warn');
-             }
-         }
-         const mergedHistory = mergeAndSaveHistory(newDataToMerge);
-         const historyKeys = Object.keys(mergedHistory).sort().reverse();
-         let totalFullWins = 0, totalWinsVsCurrentGuild = 0;
-         for (const key of historyKeys) {
-             for (const b of (mergedHistory[key] || [])) {
-                 if (isFullWin(b)) {
-                     totalFullWins++;
-                     if (enemyUserIds.has(b.defenderId)) totalWinsVsCurrentGuild++;
-                 }
-             }
-         }
-         logPanel(`📚 В базе ${historyKeys.length} дней, ${totalFullWins} побед (против текущей гильдии: ${totalWinsVsCurrentGuild}). Ищем цели...`, 'highlight');
          if (guildMembers.length === 0) {
              logPanel('⚠️ Нет попыток для атаки.', 'warn');
+             checkStorageSize();
              scheduleAutoClose();
              return;
          }
          if (freeSlots.size === 0) {
              logPanel('⚠️ Нет свободных слотов.', 'warn');
+             checkStorageSize();
              scheduleAutoClose();
              return;
          }
@@ -649,7 +754,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
              const member = guildMembers[mi];
              const memberName = memberNames[member.id] || member.id;
              setPanelTitle(`🎯 ${memberName} (${mi + 1}/${totalMembers}) [${member.tries} попыт.]`);
-             setProgress(30 + ((mi / totalMembers) * 65));
+             setProgress(35 + ((mi / totalMembers) * 60));
              if (freeSlots.size === 0) {
                  skipped.push(`${memberName}: нет свободных слотов`);
                  break;
@@ -709,7 +814,6 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
                          );
                          if (matchingTeam) {
                              logDebug(`      ✅ СОВПАДЕНИЕ с пачкой из реплея [${matchingTeam.teamType}]`);
-                             // 🔥 v4.21: Формат вывода без номера слота и [hero]/[titan]
                              logPanel(`✅ ${memberName} → ${slot.slotLocation}: ${slot.defenderName} (${foundCount + 1}/${member.tries})`, 'success');
                              const attackerNames = replayInfo.attackers.length > 0 ? replayInfo.attackers[0].teamNames : '';
                              const defenderNamesWithPets = matchingTeam.teamNames;
@@ -760,7 +864,6 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
          if (assigned.length > 0) {
              logPanel('✅ Назначения:', 'success');
              for (const a of assigned) {
-                 // 🔥 v4.21: Формат итогового отчёта: Имя → Здание-Позиция: Защитник
                  logPanel(`  • ${a.memberName} → ${a.slotLocation}: ${a.defenderName}`, 'success');
                  if (a.attackerNames) logTeamNames('     ⚔️', a.attackerNames);
                  if (a.teamNames) logTeamNames('     🛡️ ', a.teamNames);
@@ -771,6 +874,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
              for (const s of skipped) logPanel(`  • ${s}`, 'warn');
          }
          setPanelTitle(`🎯 Готово: ${assigned.length} целей назначено`);
+         checkStorageSize();
      } catch (error) {
          logPanel(`💥 Критическая ошибка: ${error.message}`, 'error');
          setPanelTitle('🎯 Ошибка');
