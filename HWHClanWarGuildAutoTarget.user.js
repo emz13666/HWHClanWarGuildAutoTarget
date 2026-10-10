@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.28
+// @version      4.29
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
 // @author       emz13666
@@ -102,12 +102,43 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
      try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
      catch (e) { logPanel('Ошибка чтения истории, начинаем с нуля', 'warn'); return {}; }
  }
+ /* 🔥 v4.29: Очистка пустых боёв и дубликатов при сохранении */
  function saveHistory(history) {
      try {
          const keys = Object.keys(history).sort().reverse();
          const pruned = {};
-         keys.slice(0, MAX_HISTORY_DAYS).forEach(k => { pruned[k] = history[k]; });
+         let cleanedCount = 0;
+         
+         keys.slice(0, MAX_HISTORY_DAYS).forEach(k => {
+             const cleanKey = k.trim(); // Убираем возможные артефакты вроде пробелов в конце ключа ("202640_5 ")
+             const battles = Array.isArray(history[k]) ? history[k] : [];
+             const cleanBattles = battles.filter(b => !isEmptyBattle(b));
+             
+             if (cleanBattles.length < battles.length) {
+                 cleanedCount += (battles.length - cleanBattles.length);
+             }
+             
+             if (cleanBattles.length > 0) {
+                 if (!pruned[cleanKey]) pruned[cleanKey] = [];
+                 pruned[cleanKey].push(...cleanBattles);
+             }
+         });
+         
+         // Дополнительная защита: убираем дубликаты replayId внутри каждого дня на случай слияния ключей
+         for (const k in pruned) {
+             const seen = new Set();
+             pruned[k] = pruned[k].filter(b => {
+                 if (seen.has(b.replayId)) return false;
+                 seen.add(b.replayId);
+                 return true;
+             });
+         }
+         
          localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
+         
+         if (cleanedCount > 0) {
+             logPanel(`🧹 При сохранении очищено ${cleanedCount} "пустых" боёв из старых данных`, 'info');
+         }
          logPanel(`💾 База истории: ${Object.keys(pruned).length} дней (макс. ${MAX_HISTORY_DAYS})`, 'info');
      } catch (e) {
          logPanel('Ошибка сохранения истории: ' + e.message, 'error');
@@ -120,7 +151,8 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
  }
  /* 🔥 v4.28: Проверка "пустого" боя по replayId (0 = незащищённая позиция) */
  function isEmptyBattle(battle) {
-     const replayId = String(battle?.replayId ?? '');
+     if (!battle || typeof battle !== 'object') return true;
+     const replayId = String(battle.replayId ?? '');
      return replayId === '0' || replayId === '';
  }
  function mergeAndSaveHistory(newData) {
@@ -241,6 +273,7 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
                  if (!merged[key]) merged[key] = [];
                  merged[key].push(...validNewBattles);
              }
+             /* 🔥 v4.29: saveHistory теперь сам вычистит старые пустые бои из merged */
              saveHistory(merged);
              let msg = `📥 История импортирована из "${file.name}": ${validEntries} дней`;
              if (skippedEmpty > 0) msg += `, пропущено пустых боёв: ${skippedEmpty}`;
