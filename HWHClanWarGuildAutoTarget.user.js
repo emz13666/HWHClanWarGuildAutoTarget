@@ -458,45 +458,34 @@ const STORAGE_KEY = 'HWH_CW_History_Log_v1';
  /* ================================================================ */
 function getSlotLocation(slotId, league) {
     slotId = parseInt(slotId);
-    const isGold = (league == 1) || (slotId > 30);
     let location = `Слот-${slotId}`;
+
+    // Основная нумерация (1-30) идентична для обеих лиг (используем if/else для диапазонов)
+    if (slotId >= 1 && slotId <= 2) location = `Ак.Магов-${slotId}`;
+    else if (slotId >= 3 && slotId <= 4) location = `Маяк-${slotId - 2}`;
+    else if (slotId >= 5 && slotId <= 6) location = `Казармы-${slotId - 4}`;
+    else if (slotId >= 7 && slotId <= 9) location = `Мост-${slotId - 6}`;
+    else if (slotId >= 10 && slotId <= 12) location = `Источник-${slotId - 9}`;
+    else if (slotId >= 13 && slotId <= 15) location = `Литейная-${slotId - 12}`;
+    else if (slotId >= 16 && slotId <= 18) location = `Врата-${slotId - 15}`;
+    else if (slotId >= 19 && slotId <= 21) location = `Баст.Огня-${slotId - 18}`;
+    else if (slotId >= 22 && slotId <= 24) location = `Баст.Льда-${slotId - 21}`;
+    else if (slotId >= 25 && slotId <= 30) location = `Цитадель-${slotId - 24}`;
     
-    if (isGold) {
-        // Основная нумерация (1-30) идентична Серебряной лиге
-        if (slotId >= 1 && slotId <= 2) location = `Ак.Магов-${slotId}`;
-        else if (slotId >= 3 && slotId <= 4) location = `Маяк-${slotId - 2}`;
-        else if (slotId >= 5 && slotId <= 6) location = `Казармы-${slotId - 4}`;
-        else if (slotId >= 7 && slotId <= 9) location = `Мост-${slotId - 6}`;
-        else if (slotId >= 10 && slotId <= 12) location = `Источник-${slotId - 9}`;
-        else if (slotId >= 13 && slotId <= 15) location = `Литейная-${slotId - 12}`;
-        else if (slotId >= 16 && slotId <= 18) location = `Врата-${slotId - 15}`;
-        else if (slotId >= 19 && slotId <= 21) location = `Баст.Огня-${slotId - 18}`;
-        else if (slotId >= 22 && slotId <= 24) location = `Баст.Льда-${slotId - 21}`;
-        else if (slotId >= 25 && slotId <= 30) location = `Цитадель-${slotId - 24}`;
-        
-        // Дополнительные позиции (31-40) идут в том же порядке зданий
-        else if (slotId === 31) location = `Ак.Магов-3`;
-        else if (slotId === 32) location = `Маяк-3`;
-        else if (slotId === 33) location = `Казармы-3`;
-        else if (slotId === 34) location = `Мост-4`;
-        else if (slotId === 35) location = `Источник-4`;
-        else if (slotId === 36) location = `Литейная-4`;
-        else if (slotId === 37) location = `Врата-4`;
-        else if (slotId === 38) location = `Баст.Огня-4`;
-        else if (slotId === 39) location = `Баст.Льда-4`;
-        else if (slotId === 40) location = `Цитадель-7`;
-    } else {
-        // Серебряная лига (1-30)
-        if (slotId >= 1 && slotId <= 2) location = `Ак.Магов-${slotId}`;
-        else if (slotId >= 3 && slotId <= 4) location = `Маяк-${slotId - 2}`;
-        else if (slotId >= 5 && slotId <= 6) location = `Казармы-${slotId - 4}`;
-        else if (slotId >= 7 && slotId <= 9) location = `Мост-${slotId - 6}`;
-        else if (slotId >= 10 && slotId <= 12) location = `Источник-${slotId - 9}`;
-        else if (slotId >= 13 && slotId <= 15) location = `Литейная-${slotId - 12}`;
-        else if (slotId >= 16 && slotId <= 18) location = `Врата-${slotId - 15}`;
-        else if (slotId >= 19 && slotId <= 21) location = `Баст.Огня-${slotId - 18}`;
-        else if (slotId >= 22 && slotId <= 24) location = `Баст.Льда-${slotId - 21}`;
-        else if (slotId >= 25 && slotId <= 30) location = `Цитадель-${slotId - 24}`;
+    // Дополнительные позиции (31-40) через switch для точных совпадений
+    if (slotId >= 31 && slotId <= 40) {
+        switch (slotId) {
+            case 31: location = `Ак.Магов-3`; break;
+            case 32: location = `Маяк-3`; break;
+            case 33: location = `Казармы-3`; break;
+            case 34: location = `Мост-4`; break;
+            case 35: location = `Источник-4`; break;
+            case 36: location = `Литейная-4`; break;
+            case 37: location = `Врата-4`; break;
+            case 38: location = `Баст.Огня-4`; break;
+            case 39: location = `Баст.Льда-4`; break;
+            case 40: location = `Цитадель-7`; break;
+        }
     }
     
     return `${location} (#${slotId})`;
