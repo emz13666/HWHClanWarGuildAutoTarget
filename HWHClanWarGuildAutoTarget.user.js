@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.31
+// @version      4.32
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
 // @author       emz13666
@@ -677,7 +677,7 @@ function getSlotLocation(slotId, league) {
          }
          logPanel(`📚 Полных побед в базе против текущей гильдии: ${totalWinsVsCurrentGuild}. Ищем цели...`, 'highlight');
          logPanel('🛡️ Проверка журнала текущего дня...', 'info');
-         const alreadyAttackedToday = new Set();
+         const alreadyAttackedToday = new Set(); // Теперь храним ключи вида "defenderId_slotId"
          try {
              const currentDayHistory = await Caller.send({
                  name: 'clanWarGetDayHistory',
@@ -686,11 +686,16 @@ function getSlotLocation(slotId, league) {
              if (currentDayHistory?.attack) {
                  for (const battle of currentDayHistory.attack) {
                      const defId = String(battle.defenderId);
+                     const slotId = battle.slotId; // Получаем ID конкретного слота
                      if (enemyUserIds.has(defId)) {
-                         alreadyAttackedToday.add(defId);
+                         // Запоминаем атаку КОНКРЕТНОГО слота, а не всего игрока целиком
+                         const attackKey = slotId ? `${defId}_${slotId}` : defId;
+                         alreadyAttackedToday.add(attackKey);
+                
                          const defName = memberNames[defId] || defId;
                          const atkName = memberNames[String(battle.attackerId)] || battle.attackerId;
-                         logPanel(`  🛡️ ${defName}: атакован сегодня (${atkName})`, 'warn');
+                         const slotInfo = slotId ? ` (слот ${slotId})` : '';
+                         logPanel(`🛡️ ${defName}${slotInfo}: атакован сегодня (${atkName})`, 'warn');
                      }
                  }
              }
@@ -707,7 +712,10 @@ function getSlotLocation(slotId, league) {
              const isMarkFree = !slotData.targetMarkingUserId || String(slotData.targetMarkingUserId) === "0";
              const isAttackerFree = !slotData.attackerId || String(slotData.attackerId) === "0";
              const isReady = slotData.status === "ready";
-             const isNotAttackedToday = !alreadyAttackedToday.has(defenderId);
+             // Проверяем, атакован ли именно этот конкретный слот этим игроком
+             const attackKey = `${defenderId}_${slotId}`;
+             const isNotAttackedToday = !alreadyAttackedToday.has(attackKey) && !alreadyAttackedToday.has(defenderId); 
+             // (второе условие - страховка на случай, если API вдруг не вернет slotId в истории)
              const isFree = isMarkFree && isAttackerFree && isReady && isNotAttackedToday;
              if (isFree) {
                  const teamObj = slotData.team?.[0] || {};
