@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.30
+// @version      4.31
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
 // @author       emz13666
@@ -460,18 +460,33 @@ function getSlotLocation(slotId, league) {
     slotId = parseInt(slotId);
     const isGold = (league == 1) || (slotId > 30);
     let location = `Слот-${slotId}`;
+    
     if (isGold) {
-        if (slotId >= 1 && slotId <= 3) location = `Ак.Магов-${slotId}`;
-        else if (slotId >= 4 && slotId <= 6) location = `Маяк-${slotId - 3}`;
-        else if (slotId >= 7 && slotId <= 9) location = `Казармы-${slotId - 6}`;
-        else if (slotId >= 10 && slotId <= 13) location = `Мост-${slotId - 9}`;
-        else if (slotId >= 14 && slotId <= 17) location = `Источник-${slotId - 13}`;
-        else if (slotId >= 18 && slotId <= 21) location = `Литейная-${slotId - 17}`;
-        else if (slotId >= 22 && slotId <= 25) location = `Врата-${slotId - 21}`;
-        else if (slotId >= 26 && slotId <= 29) location = `Баст.Огня-${slotId - 25}`;
-        else if (slotId >= 30 && slotId <= 33) location = `Баст.Льда-${slotId - 29}`;
-        else if (slotId >= 34 && slotId <= 40) location = `Цитадель-${slotId - 33}`;
+        // Основная нумерация (1-30) идентична Серебряной лиге
+        if (slotId >= 1 && slotId <= 2) location = `Ак.Магов-${slotId}`;
+        else if (slotId >= 3 && slotId <= 4) location = `Маяк-${slotId - 2}`;
+        else if (slotId >= 5 && slotId <= 6) location = `Казармы-${slotId - 4}`;
+        else if (slotId >= 7 && slotId <= 9) location = `Мост-${slotId - 6}`;
+        else if (slotId >= 10 && slotId <= 12) location = `Источник-${slotId - 9}`;
+        else if (slotId >= 13 && slotId <= 15) location = `Литейная-${slotId - 12}`;
+        else if (slotId >= 16 && slotId <= 18) location = `Врата-${slotId - 15}`;
+        else if (slotId >= 19 && slotId <= 21) location = `Баст.Огня-${slotId - 18}`;
+        else if (slotId >= 22 && slotId <= 24) location = `Баст.Льда-${slotId - 21}`;
+        else if (slotId >= 25 && slotId <= 30) location = `Цитадель-${slotId - 24}`;
+        
+        // Дополнительные позиции (31-40) идут в том же порядке зданий
+        else if (slotId === 31) location = `Ак.Магов-3`;
+        else if (slotId === 32) location = `Маяк-3`;
+        else if (slotId === 33) location = `Казармы-3`;
+        else if (slotId === 34) location = `Мост-4`;
+        else if (slotId === 35) location = `Источник-4`;
+        else if (slotId === 36) location = `Литейная-4`;
+        else if (slotId === 37) location = `Врата-4`;
+        else if (slotId === 38) location = `Баст.Огня-4`;
+        else if (slotId === 39) location = `Баст.Льда-4`;
+        else if (slotId === 40) location = `Цитадель-7`;
     } else {
+        // Серебряная лига (1-30)
         if (slotId >= 1 && slotId <= 2) location = `Ак.Магов-${slotId}`;
         else if (slotId >= 3 && slotId <= 4) location = `Маяк-${slotId - 2}`;
         else if (slotId >= 5 && slotId <= 6) location = `Казармы-${slotId - 4}`;
@@ -483,7 +498,8 @@ function getSlotLocation(slotId, league) {
         else if (slotId >= 22 && slotId <= 24) location = `Баст.Льда-${slotId - 21}`;
         else if (slotId >= 25 && slotId <= 30) location = `Цитадель-${slotId - 24}`;
     }
-    return `${location} (слот ${slotId})`;
+    
+    return `${location} (#${slotId})`;
 }
  /* ================================================================ */
  /* 🔥 ПЕРЕВОД ID ГЕРОЕВ/ТИТАНОВ/ПИТОМЦЕВ В ИМЕНА                  */
