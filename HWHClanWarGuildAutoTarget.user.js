@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.46
+// @version      4.47
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666
@@ -722,7 +722,8 @@ function getTeamType(teamObj) {
 }
 
 /* ================================================================ /
-/ 🔥 v4.40: ПОСТРОЕНИЕ ИНДЕКСА ПАЧЕК (с обогащением и кэшем)     /
+/ 🔥 v4.46: ПОСТРОЕНИЕ ИНДЕКСА ПАЧЕК (с обогащением и кэшем)     /
+/ Исправлена ошибка "ri is not defined"                            /
 / ================================================================ */
 async function buildPackIndex(mergedHistory, maxNew = 300) {
     const idx = new Map();
@@ -739,9 +740,23 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
         for (const b of battles) {
             if (!isFullWin(b) || isEmptyBattle(b)) continue;
             let defenders = [];
+            // 🔥 v4.46: объявляем ri ДО ветвления
+            let ri = null;
+            
             if (Array.isArray(b.defenderPacks) && b.defenderPacks.length > 0) {
                 defenders = b.defenderPacks;
                 fromStorage++;
+                // 🔥 v4.46: пытаемся взять полную информацию о реплее из кэша
+                // (нам нужны имена атакующих для логов альтернатив)
+                if (replayMemoryCache.has(b.replayId)) {
+                    ri = replayMemoryCache.get(b.replayId);
+                } else {
+                    const storageCache = getReplayStorageCache();
+                    if (storageCache[b.replayId]) {
+                        ri = storageCache[b.replayId];
+                        replayMemoryCache.set(b.replayId, ri);
+                    }
+                }
             } else {
                 if (newLoads >= maxNew) { skippedNoData++; continue; }
                 if (newLoads % 10 === 0) {
@@ -752,7 +767,7 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
                         lastProgressPct = pct;
                     }
                 }
-                const ri = await getReplayInfo(b.replayId);
+                ri = await getReplayInfo(b.replayId);
                 defenders = ri.defenders;
                 newLoads++;
                 if (defenders.length > 0) {
@@ -764,15 +779,16 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
                 }
                 await sleep(100);
             }
+            
             for (const d of defenders) {
                 const pk = d.teamType + '|' + d.teamString;
                 if (!idx.has(pk)) idx.set(pk, new Map());
                 const am = idx.get(pk);
                 
-                // 🔥 v4.45: Сохраняем не просто число, а объект с данными о пачках
+                // 🔥 v4.46: безопасное обращение к ri
                 let attackerNames = '';
-                if (ri.attackers.length > 0) {
-                    attackerNames = ri.attackers[0].teamNames;
+                if (ri && Array.isArray(ri.attackers) && ri.attackers.length > 0) {
+                    attackerNames = ri.attackers[0].teamNames || '';
                 }
 
                 if (!am.has(b.attackerId)) {
@@ -780,14 +796,15 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
                         wins: 0,
                         replayId: b.replayId,
                         attackerNames: attackerNames,
-                        defenderNames: d.teamNames
+                        defenderNames: d.teamNames || ''
                     });
                 }
                 const entry = am.get(b.attackerId);
                 entry.wins++;
                 entry.replayId = b.replayId;
-                entry.attackerNames = attackerNames;
-                entry.defenderNames = d.teamNames;
+                // Обновляем имена, если они теперь доступны (из кэша)
+                if (attackerNames) entry.attackerNames = attackerNames;
+                if (d.teamNames) entry.defenderNames = d.teamNames;
             }
         }
     }
