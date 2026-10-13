@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.45
+// @version      4.46
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666
@@ -163,6 +163,66 @@ function flushReplayCache() {
             const count = Object.keys(replayStorageCache).length;
             logPanel(`💾 Кэш реплеев сохранён: ${count} записей`, 'info');
         }
+    }
+}
+
+/* ================================================================ /
+/ 🔥 v4.46: ЗАГРУЗКА РЕПЛЕЯ С ТРЁХУРОВНЕВЫМ КЭШЕМ                /
+/ (Восстановлена после случайного удаления)                        /
+/ ================================================================ */
+async function getReplayInfo(replayId) {
+    // 1. Проверяем кэш в памяти (самый быстрый)
+    if (replayMemoryCache.has(replayId)) return replayMemoryCache.get(replayId);
+
+    // 2. Проверяем кэш в localStorage
+    const storageCache = getReplayStorageCache();
+    if (storageCache[replayId]) {
+        const cached = storageCache[replayId];
+        replayMemoryCache.set(replayId, cached);
+        logDebug(`📼 Реплей ${replayId}: взят из кэша localStorage`);
+        return cached;
+    }
+
+    // 3. Загружаем с сервера, если в кэше нет
+    try {
+        const replay = await Caller.send({ name: 'battleGetReplay', args: { id: replayId } });
+        const result = { attackers: [], defenders: [] };
+        
+        const pastAttackers = replay?.replay?.attackers;
+        if (pastAttackers) {
+            let attackerList = [];
+            if (Array.isArray(pastAttackers)) attackerList = pastAttackers;
+            else if (typeof pastAttackers === 'object') attackerList = Object.values(pastAttackers);
+            if (attackerList.length > 0) {
+                const teamString = getTeamSignature(attackerList);
+                const teamNames = getTeamNamesString(attackerList);
+                if (teamString) result.attackers.push({ teamString, teamNames });
+            }
+        }
+        
+        const pastDefenders = replay?.replay?.defenders;
+        if (pastDefenders && pastDefenders.length > 0) {
+            for (const defTeam of pastDefenders) {
+                const teamString = getTeamSignature(defTeam);
+                const teamType = getTeamType(defTeam);
+                const teamNames = getTeamNamesString(defTeam);
+                if (teamString && teamType) result.defenders.push({ teamString, teamType, teamNames });
+            }
+        }
+        
+        // Сохраняем в оба уровня кэша
+        replayMemoryCache.set(replayId, result);
+        storageCache[replayId] = result;
+        replayStorageDirty = true;
+        
+        logDebug(`📼 Реплей ${replayId}: загружен с сервера и сохранён в кэш`);
+        for (const d of result.defenders) {
+            logDebug(`   🛡️ [${d.teamType}] пачка=[${d.teamString}] → ${d.teamNames}`);
+        }
+        return result;
+    } catch (e) {
+        logPanel(`Не удалось загрузить реплей ${replayId}`, 'warn');
+        return { attackers: [], defenders: [] };
     }
 }
 
@@ -739,7 +799,7 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
 }
 
 /* ================================================================ /
-/ 🔥 v4.45: ПОИСК АЛЬТЕРНАТИВНЫХ НАЗНАЧЕНИЙ                       /
+/ 🔥 v4.43: ПОИСК АЛЬТЕРНАТИВНЫХ НАЗНАЧЕНИЙ                       /
 / Учитывает уже занятые попытки (available вместо total)          /
 / ================================================================ */
 function findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyAttackedToday, memberNames) {
@@ -771,6 +831,7 @@ function findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyA
             
             all.push(entry);
             
+            // Исключаем, если не осталось попыток или игрок уже на этом слоте
             if (left <= 0 || slot.assignedAttackerId === atkId || alreadyAttackedToday.has(slot.defenderId)) continue;
             filtered.push(entry);
         }
@@ -779,7 +840,6 @@ function findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyA
     }
     return alts;
 }
-
 function logAlternatives(alternatives, assigned) {
     for (const a of assigned) {
         const alt = alternatives.get(a.slotId);
@@ -805,7 +865,7 @@ function logAlternatives(alternatives, assigned) {
 }
 
 /* ================================================================  /
-/  🔥 v4.45: НАЗНАЧЕНИЕ АЛЬТЕРНАТИВНЫХ ЦЕЛЕЙ                       /
+/  🔥 v4.43: НАЗНАЧЕНИЕ АЛЬТЕРНАТИВНЫХ ЦЕЛЕЙ                       /
 /  Проверяет available - used, а не просто used                    /
 /  ================================================================ */
 async function assignAlternatives(alternatives, guildMembers, usedTries, alreadyAttackedToday) {
@@ -982,10 +1042,12 @@ async function autoAssignGuildTargets() {
         logPanel(`📊 Сезон/День: ${currentSeason}/${currentDay}, Лига: ${league == 1 ? 'Золотая' : 'Серебряная'}, попытки: ${cwInfo.myTries}`, 'info');
 
         /* ============================================================ */
-        /* 🔥 v4.43: ПОДСЧЁТ УЖЕ ЗАНЯТЫХ ПОПЫТОК ДО ЗАПУСКА СКРИПТА   */
+        /* 🔥 v4.44: ПОДСЧЁТ УЖЕ ЗАНЯТЫХ ПОПЫТОК ДО ЗАПУСКА СКРИПТА   */
         /* ============================================================ */
         const preAssignedTries = new Map();
         for (const slotData of Object.values(enemySlots)) {
+            // Исправлено! Игра использует targetMarkingUserId для отметки цели,
+            // а attackerId может быть 0 до начала/завершения боя. Проверяем оба поля.
             const markerId = String(slotData.targetMarkingUserId || slotData.attackerId || "0");
             if (markerId !== "0" && markerId !== "null" && markerId !== "undefined") {
                 preAssignedTries.set(markerId, (preAssignedTries.get(markerId) || 0) + 1);
@@ -1015,6 +1077,7 @@ async function autoAssignGuildTargets() {
             }
         }
         
+        // Сортируем: сначала те, у кого есть свободные попытки
         guildMembers.sort((a, b) => b.available - a.available);
         logPanel(`✅ ${guildMembers.filter(m => m.available > 0).length} членов гильдии со свободными попытками, всего ${totalTries} попыток`, 'success');
 
@@ -1127,6 +1190,7 @@ async function autoAssignGuildTargets() {
         for (let mi = 0; mi < guildMembers.length; mi++) {
             const member = guildMembers[mi];
             
+            // Пропускаем тех, у кого не осталось попыток
             if (member.available <= 0) continue;
 
             const memberName = memberNames[member.id] || member.id;
@@ -1173,6 +1237,8 @@ async function autoAssignGuildTargets() {
                         logDebug(`⏭️ ${memberName}: защитник ${memberNames[defenderId] || defenderId} уже назначен ранее в этом запуске`);
                         continue;
                     }
+                    
+                    // 🔥 v4.46: Теперь getReplayInfo определён и работает корректно
                     const replayInfo = await getReplayInfo(win.replayId);
                     if (replayInfo.defenders.length === 0) {
                         logDebug(`⏭️ Реплей ${win.replayId}: нет пачек защитников`);
