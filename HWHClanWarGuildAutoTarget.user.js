@@ -2,9 +2,9 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.44
-// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers.
-// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов.
+// @version      4.45
+// @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
+// @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666
 // @license      MIT
 // @icon         data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmQyNGQiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSIxNC41IDE3LjUgMyA2IDMgMyA2IDMgMTcuNSAxNC41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSIxMyIgeTE9IjE5IiB4Mj0iMTkiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIxNiIgeTE9IjE2IiB4Mj0iMjAiIHkyPSIyMCI+PC9saW5lPjxsaW5lIHgxPSIxOSIgeTE9IjIxIiB4Mj0iMjEiIHkyPSIxOSI+PC9saW5lPjxwb2x5bGluZSBwb2ludHM9IjE0LjUgNi41IDE4IDMgMjEgMyAyMSA2IDE3LjUgOS41Ij48L3BvbHlsaW5lPjxsaW5lIHgxPSI1IiB5MT0iMTQiIHgyPSI5IiB5Mj0iMTgiPjwvbGluZT48bGluZSB4MT0iNyIgeTE9IjE3IiB4Mj0iMTEiIHkyPSIxMyI+PC9saW5lPjxsaW5lIHgxPSIzIiB5MT0iMTkiIHgyPSI1IiB5Mj0iMTciPjwvbGluZT48L3N2Zz4=
@@ -13,8 +13,8 @@
 // @match        https://apps-1701433570146040.apps.fbsbx.com/*
 // @run-at       document-end
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTarget.user.js
-// @updateURL    https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTarget.user.js
+// @downloadURL  https://gitverse.ru/api/repos/emz13/HWHClanWarGuildAutoTarget/raw/branch/main/HWHClanWarGuildAutoTarget.user.js
+// @updateURL    https://gitverse.ru/api/repos/emz13/HWHClanWarGuildAutoTarget/raw/branch/main/HWHClanWarGuildAutoTarget.user.js
 // ==/UserScript==
 (async function () {
 'use strict';
@@ -662,57 +662,6 @@ function getTeamType(teamObj) {
 }
 
 /* ================================================================ /
-/ 📼 ЗАГРУЗКА РЕПЛЕЯ С ТРЁХУРОВНЕВЫМ КЭШЕМ                        /
-/ ================================================================ */
-async function getReplayInfo(replayId) {
-    if (replayMemoryCache.has(replayId)) return replayMemoryCache.get(replayId);
-
-    const storageCache = getReplayStorageCache();
-    if (storageCache[replayId]) {
-        const cached = storageCache[replayId];
-        replayMemoryCache.set(replayId, cached);
-        logDebug(`📼 Реплей ${replayId}: взят из кэша localStorage`);
-        return cached;
-    }
-
-    try {
-        const replay = await Caller.send({ name: 'battleGetReplay', args: { id: replayId } });
-        const result = { attackers: [], defenders: [] };
-        const pastAttackers = replay?.replay?.attackers;
-        if (pastAttackers) {
-            let attackerList = [];
-            if (Array.isArray(pastAttackers)) attackerList = pastAttackers;
-            else if (typeof pastAttackers === 'object') attackerList = Object.values(pastAttackers);
-            if (attackerList.length > 0) {
-                const teamString = getTeamSignature(attackerList);
-                const teamNames = getTeamNamesString(attackerList);
-                if (teamString) result.attackers.push({ teamString, teamNames });
-            }
-        }
-        const pastDefenders = replay?.replay?.defenders;
-        if (pastDefenders && pastDefenders.length > 0) {
-            for (const defTeam of pastDefenders) {
-                const teamString = getTeamSignature(defTeam);
-                const teamType = getTeamType(defTeam);
-                const teamNames = getTeamNamesString(defTeam);
-                if (teamString && teamType) result.defenders.push({ teamString, teamType, teamNames });
-            }
-        }
-        replayMemoryCache.set(replayId, result);
-        storageCache[replayId] = result;
-        replayStorageDirty = true;
-        logDebug(`📼 Реплей ${replayId}: загружен с сервера и сохранён в кэш`);
-        for (const d of result.defenders) {
-            logDebug(`   🛡️ [${d.teamType}] пачка=[${d.teamString}] → ${d.teamNames}`);
-        }
-        return result;
-    } catch (e) {
-        logPanel(`Не удалось загрузить реплей ${replayId}`, 'warn');
-        return { attackers: [], defenders: [] };
-    }
-}
-
-/* ================================================================ /
 / 🔥 v4.40: ПОСТРОЕНИЕ ИНДЕКСА ПАЧЕК (с обогащением и кэшем)     /
 / ================================================================ */
 async function buildPackIndex(mergedHistory, maxNew = 300) {
@@ -759,8 +708,26 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
                 const pk = d.teamType + '|' + d.teamString;
                 if (!idx.has(pk)) idx.set(pk, new Map());
                 const am = idx.get(pk);
-                if (!am.has(b.attackerId)) am.set(b.attackerId, 0);
-                am.set(b.attackerId, am.get(b.attackerId) + 1);
+                
+                // 🔥 v4.45: Сохраняем не просто число, а объект с данными о пачках
+                let attackerNames = '';
+                if (ri.attackers.length > 0) {
+                    attackerNames = ri.attackers[0].teamNames;
+                }
+
+                if (!am.has(b.attackerId)) {
+                    am.set(b.attackerId, {
+                        wins: 0,
+                        replayId: b.replayId,
+                        attackerNames: attackerNames,
+                        defenderNames: d.teamNames
+                    });
+                }
+                const entry = am.get(b.attackerId);
+                entry.wins++;
+                entry.replayId = b.replayId;
+                entry.attackerNames = attackerNames;
+                entry.defenderNames = d.teamNames;
             }
         }
     }
@@ -772,7 +739,7 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
 }
 
 /* ================================================================ /
-/ 🔥 v4.43: ПОИСК АЛЬТЕРНАТИВНЫХ НАЗНАЧЕНИЙ                       /
+/ 🔥 v4.45: ПОИСК АЛЬТЕРНАТИВНЫХ НАЗНАЧЕНИЙ                       /
 / Учитывает уже занятые попытки (available вместо total)          /
 / ================================================================ */
 function findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyAttackedToday, memberNames) {
@@ -782,7 +749,9 @@ function findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyA
         const am = packIndex.get(pk);
         if (!am || am.size === 0) continue;
         const all = [], filtered = [];
-        for (const [atkId, wins] of am) {
+        
+        // 🔥 v4.45: d теперь это объект { wins, replayId, attackerNames, defenderNames }
+        for (const [atkId, data] of am) {
             const member = guildMembers.find(m => m.id === atkId);
             if (!member) continue;
             
@@ -791,17 +760,26 @@ function findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyA
             const left = available - usedInThisRun;
             const name = memberNames[atkId] || atkId;
             
-            all.push({ attackerId: atkId, attackerName: name, winsCount: wins, triesLeft: left });
+            const entry = {
+                attackerId: atkId,
+                attackerName: name,
+                winsCount: data.wins,
+                triesLeft: left,
+                attackerNames: data.attackerNames,
+                defenderNames: data.defenderNames
+            };
             
-            // Исключаем, если не осталось попыток или игрок уже на этом слоте
+            all.push(entry);
+            
             if (left <= 0 || slot.assignedAttackerId === atkId || alreadyAttackedToday.has(slot.defenderId)) continue;
-            filtered.push({ attackerId: atkId, attackerName: name, winsCount: wins, triesLeft: left });
+            filtered.push(entry);
         }
         filtered.sort((a, b) => b.winsCount !== a.winsCount ? b.winsCount - a.winsCount : b.triesLeft - a.triesLeft);
         alts.set(slot.slotId, { slotInfo: slot, allCount: all.length, topList: filtered.slice(0, 5), isAssigned: slot.assignedAttackerId !== null });
     }
     return alts;
 }
+
 function logAlternatives(alternatives, assigned) {
     for (const a of assigned) {
         const alt = alternatives.get(a.slotId);
@@ -827,7 +805,7 @@ function logAlternatives(alternatives, assigned) {
 }
 
 /* ================================================================  /
-/  🔥 v4.43: НАЗНАЧЕНИЕ АЛЬТЕРНАТИВНЫХ ЦЕЛЕЙ                       /
+/  🔥 v4.45: НАЗНАЧЕНИЕ АЛЬТЕРНАТИВНЫХ ЦЕЛЕЙ                       /
 /  Проверяет available - used, а не просто used                    /
 /  ================================================================ */
 async function assignAlternatives(alternatives, guildMembers, usedTries, alreadyAttackedToday) {
@@ -858,6 +836,11 @@ async function assignAlternatives(alternatives, guildMembers, usedTries, already
                     count++;
                     altUsed.set(alt.attackerId, used + 1);
                     logPanel(`✅ Альт: ${alt.attackerName} → ${d.slotInfo.slotLocation}: ${d.slotInfo.defenderName} (попытка ${used + 1}/${available})`, 'success');
+                    
+                    // 🔥 v4.45: Логирование составов пачек, как в основном цикле
+                    if (alt.attackerNames) logTeamNames('     ⚔️', alt.attackerNames);
+                    if (alt.defenderNames) logTeamNames('     🛡️ ', alt.defenderNames);
+                    
                     break;
                 } else {
                     logPanel(`❌ Ошибка сервера: ${JSON.stringify(r)}`, 'error');
@@ -999,12 +982,10 @@ async function autoAssignGuildTargets() {
         logPanel(`📊 Сезон/День: ${currentSeason}/${currentDay}, Лига: ${league == 1 ? 'Золотая' : 'Серебряная'}, попытки: ${cwInfo.myTries}`, 'info');
 
         /* ============================================================ */
-        /* 🔥 v4.44: ПОДСЧЁТ УЖЕ ЗАНЯТЫХ ПОПЫТОК ДО ЗАПУСКА СКРИПТА   */
+        /* 🔥 v4.43: ПОДСЧЁТ УЖЕ ЗАНЯТЫХ ПОПЫТОК ДО ЗАПУСКА СКРИПТА   */
         /* ============================================================ */
         const preAssignedTries = new Map();
         for (const slotData of Object.values(enemySlots)) {
-            // 🔥 Исправлено! Игра использует targetMarkingUserId для отметки цели,
-            // а attackerId может быть 0 до начала/завершения боя. Проверяем оба поля.
             const markerId = String(slotData.targetMarkingUserId || slotData.attackerId || "0");
             if (markerId !== "0" && markerId !== "null" && markerId !== "undefined") {
                 preAssignedTries.set(markerId, (preAssignedTries.get(markerId) || 0) + 1);
@@ -1034,7 +1015,6 @@ async function autoAssignGuildTargets() {
             }
         }
         
-        // Сортируем: сначала те, у кого есть свободные попытки
         guildMembers.sort((a, b) => b.available - a.available);
         logPanel(`✅ ${guildMembers.filter(m => m.available > 0).length} членов гильдии со свободными попытками, всего ${totalTries} попыток`, 'success');
 
@@ -1147,7 +1127,6 @@ async function autoAssignGuildTargets() {
         for (let mi = 0; mi < guildMembers.length; mi++) {
             const member = guildMembers[mi];
             
-            // Пропускаем тех, у кого не осталось попыток
             if (member.available <= 0) continue;
 
             const memberName = memberNames[member.id] || member.id;
@@ -1347,7 +1326,7 @@ function registerButton() {
     const button = {
         hwhGuildAutoTarget: true,
         msg: '🎯 Авто-цели для гильдии',
-        title: 'Назначает цели по истории побед. Учитывает уже занятые попытки (вручную или скриптом). Бэкап (💾) сохраняет историю + кэш.',
+        title: 'Назначает цели по истории побед. Учитывает уже занятые попытки. Показывает составы пачек в альтернативах. Бэкап (💾) сохраняет историю + кэш.',
         color: 'purple',
         async result() {
             await sleep(300);
