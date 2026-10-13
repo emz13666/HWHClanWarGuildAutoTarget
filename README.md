@@ -68,6 +68,10 @@
 
 Если вы нашли баг или хотите предложить улучшение, создайте [Issue](https://github.com/emz13666/HWHClanWarGuildAutoTarget/issues) или [Pull Request](https://github.com/emz13666/HWHClanWarGuildAutoTarget/pulls).
 
+## Благодарности
+
+- [ZingerY](https://greasyfork.org/ru/scripts/450693-herowarshelper) — за HeroWarsHelper.
+
 ## 📜 Лицензия
 
 Этот проект распространяется под лицензией [MIT](LICENSE).
