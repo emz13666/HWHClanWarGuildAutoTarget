@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.48
+// @version      4.50
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666
@@ -53,84 +53,353 @@ try {
     console.warn(' [HWHClanWarGuildAutoTarget] Не удалось зарегистрировать расширение в HWH:', e);
 }
 
-/* ================================================================  /
-/  📊 ПРОВЕРКА ОБЪЁМА LOCALSTORAGE                                  /
-/  ================================================================ */
-function checkStorageSize() {
-    try {
-        let totalBytes = 0, historyBytes = 0, historyChars = 0, replayBytes = 0, replayChars = 0, replayCount = 0, keysCount = 0;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            const value = localStorage.getItem(key) || '';
-            const bytes = value.length * 2;
-            totalBytes += bytes;
-            keysCount++;
-            if (key === STORAGE_KEY) { historyBytes = bytes; historyChars = value.length; }
-            if (key === REPLAY_CACHE_KEY) {
-                replayBytes = bytes; replayChars = value.length;
-                try { replayCount = Object.keys(JSON.parse(value)).length; } catch (e) { replayCount = 0; }
+/* ================================================================ /
+/ 🗄️ IndexedDB-хранилище (v4.49) с миграцией из localStorage      /
+/ ================================================================ */
+const IDB_NAME = 'HWHClanWarGuildAutoTarget';
+const IDB_VERSION = 1;
+const IDB_STORE_HISTORY = 'history';   // ключ: "<season>_<day>"
+const IDB_STORE_REPLAYS = 'replays';   // ключ: "<replayId>"
+const MIGRATION_FLAG = 'HWH_CW_MigratedToIDB_v1';
+
+class CwIdb {
+    constructor() {
+        this.db = null;
+        this.available = true;
+    }
+
+    async open() {
+        if (this.db) return this.db;
+        if (typeof indexedDB === 'undefined') { this.available = false; return null; }
+        return new Promise((resolve) => {
+            let req;
+            try {
+                req = indexedDB.open(IDB_NAME, IDB_VERSION);
+            } catch (e) {
+                this.available = false;
+                resolve(null);
+                return;
             }
-        }
-        const limitBytes = LOCALSTORAGE_LIMIT_MB * 1024 * 1024;
-        const freeBytes = Math.max(0, limitBytes - totalBytes);
-        const formatBytes = (b) => {
-            if (b < 1024) return b + ' Б';
-            if (b < 1024 * 1024) return (b / 1024).toFixed(2) + ' КБ';
-            return (b / (1024 * 1024)).toFixed(2) + ' МБ';
-        };
-        const percentUsed = ((totalBytes / limitBytes) * 100).toFixed(2);
-        const historyPercent = historyBytes > 0 ? ((historyBytes / totalBytes) * 100).toFixed(2) : '0.00';
-        const replayPercent = replayBytes > 0 ? ((replayBytes / totalBytes) * 100).toFixed(2) : '0.00';
-        console.group(`%c[HWH CW Auto] 📊 Состояние localStorage`, 'color: #ffd24d; font-weight: bold');
-        console.log(`%c🗄️ История ВГ (ключ "${STORAGE_KEY}"):`, 'color: #7fff7f');
-        console.log(`• Символов : ${historyChars.toLocaleString('ru-RU')}`);
-        console.log(`• Размер : ${formatBytes(historyBytes)}`);
-        console.log(`• Доля : ${historyPercent}% от всего localStorage`);
-        console.log(`%c📼 Кэш реплеев (ключ "${REPLAY_CACHE_KEY}"):`, 'color: #80d4ff');
-        console.log(`• Записей : ${replayCount.toLocaleString('ru-RU')} (макс. ${MAX_REPLAY_CACHE_ENTRIES})`);
-        console.log(`• Символов : ${replayChars.toLocaleString('ru-RU')}`);
-        console.log(`• Размер : ${formatBytes(replayBytes)}`);
-        console.log(`• Доля : ${replayPercent}% от всего localStorage`);
-        console.log(`%c📦 Общий объём localStorage:`, 'color: #b8d4e3');
-        console.log(`• Ключей : ${keysCount}`);
-        console.log(`• Занято : ${formatBytes(totalBytes)} (${percentUsed}%)`);
-        console.log(`• Свободно : ${formatBytes(freeBytes)} из ${formatBytes(limitBytes)}`);
-        if (totalBytes / limitBytes > 0.8) {
-            console.warn(`%c⚠️ Внимание: хранилище заполнено более чем на 80%!`, 'color: #ffd24d; font-weight: bold');
-        }
-        console.groupEnd();
-    } catch (e) {
-        console.error('[HWH CW Auto] Ошибка при проверке localStorage:', e);
+            req.onerror = () => { this.available = false; resolve(null); };
+            req.onsuccess = () => { this.db = req.result; resolve(this.db); };
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(IDB_STORE_HISTORY)) db.createObjectStore(IDB_STORE_HISTORY);
+                if (!db.objectStoreNames.contains(IDB_STORE_REPLAYS)) db.createObjectStore(IDB_STORE_REPLAYS);
+            };
+        });
+    }
+
+    _tx(store, mode) {
+        return this.db.transaction([store], mode).objectStore(store);
+    }
+
+    async put(store, key, value) {
+        if (!this.available) return false;
+        await this.open();
+        if (!this.db) return false;
+        return new Promise((resolve) => {
+            const req = this._tx(store, 'readwrite').put(value, key);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => { console.warn('[CW IDB] put error', req.error); resolve(false); };
+        });
+    }
+
+    async get(store, key) {
+        if (!this.available) return undefined;
+        await this.open();
+        if (!this.db) return undefined;
+        return new Promise((resolve) => {
+            const req = this._tx(store, 'readonly').get(key);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => resolve(undefined);
+        });
+    }
+
+    async delete(store, key) {
+        if (!this.available) return;
+        await this.open();
+        if (!this.db) return;
+        return new Promise((resolve) => {
+            const req = this._tx(store, 'readwrite').delete(key);
+            req.onsuccess = () => resolve();
+            req.onerror = () => resolve();
+        });
+    }
+
+    async getAll(store) {
+        if (!this.available) return [];
+        await this.open();
+        if (!this.db) return [];
+        return new Promise((resolve) => {
+            const req = this._tx(store, 'readonly').getAll();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => resolve([]);
+        });
+    }
+
+    async getAllKeys(store) {
+        if (!this.available) return [];
+        await this.open();
+        if (!this.db) return [];
+        return new Promise((resolve) => {
+            const req = this._tx(store, 'readonly').getAllKeys();
+            req.onsuccess = () => resolve(req.result || []);
+            req.onerror = () => resolve([]);
+        });
+    }
+
+    async clear(store) {
+        if (!this.available) return;
+        await this.open();
+        if (!this.db) return;
+        return new Promise((resolve) => {
+            const req = this._tx(store, 'readwrite').clear();
+            req.onsuccess = () => resolve();
+            req.onerror = () => resolve();
+        });
+    }
+
+    /** Удалить записи старше N дней (для реплеев — по ts, для истории — по ключу-дате) */
+    async pruneHistory(maxDays) {
+        const keys = await this.getAllKeys(IDB_STORE_HISTORY);
+        const sorted = keys.sort(compareHistoryKeys);
+        const toDelete = sorted.slice(maxDays);
+        for (const k of toDelete) await this.delete(IDB_STORE_HISTORY, k);
+        return toDelete.length;
+    }
+
+    async pruneReplays(maxEntries) {
+        const keys = await this.getAllKeys(IDB_STORE_REPLAYS);
+        if (keys.length <= maxEntries) return 0;
+        // Оставляем последние maxEntries (порядок появления ключей не гарантирован, поэтому
+        // удаляем просто "лишние" - стратегия как в старом saveReplayCache)
+        const toDelete = keys.slice(0, keys.length - maxEntries);
+        for (const k of toDelete) await this.delete(IDB_STORE_REPLAYS, k);
+        return toDelete.length;
     }
 }
-checkStorageSize();
+
+const cwIdb = new CwIdb();
 
 /* ================================================================ /
-/ 📼 КЭШ РЕПЛЕЕВ В LOCALSTORAGE                                   /
+/ 🔄 Миграция из localStorage → IndexedDB                          /
+/ ================================================================ */
+async function migrateLocalStorageToIdb() {
+    if (localStorage.getItem(MIGRATION_FLAG) === 'done') {
+        // 🔥 Автолечение: если LS-ключи каким-то образом вернулись — переносим заново
+        if (localStorage.getItem(STORAGE_KEY) || localStorage.getItem(REPLAY_CACHE_KEY)) {
+            logPanel('⚠️ Флаг миграции стоит, но LS-ключи существуют — домигрируем', 'warn');
+            localStorage.removeItem(MIGRATION_FLAG);
+        } else {
+            return;
+        }
+    }
+    if (!cwIdb.available) {
+        logPanel('⚠️ IndexedDB недоступен, продолжаем на localStorage', 'warn');
+        return;
+    }
+    await cwIdb.open();
+    if (!cwIdb.db) return;
+
+    // 🔥 Проверяем, есть ли вообще что мигрировать
+    const hasLsHistory = !!localStorage.getItem(STORAGE_KEY);
+    const hasLsReplays = !!localStorage.getItem(REPLAY_CACHE_KEY);
+    if (!hasLsHistory && !hasLsReplays) {
+        // Нечего переносить — просто ставим флаг и идём дальше
+        localStorage.setItem(MIGRATION_FLAG, 'done');
+        return;
+    }
+
+    logPanel('🔄 Миграция localStorage → IndexedDB...', 'info');
+
+    let historyOk = true, replaysOk = true;
+    let historyCount = 0, replaysCount = 0, historyFailed = 0, replaysFailed = 0;
+
+    // ---- История ----
+    if (hasLsHistory) {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
+            for (const [dayKey, battles] of Object.entries(parsed)) {
+                if (!Array.isArray(battles) || battles.length === 0) continue;
+                const ok = await cwIdb.put(IDB_STORE_HISTORY, dayKey, battles);  // 🔥 проверяем результат
+                if (ok) historyCount++;
+                else { historyFailed++; historyOk = false; }
+            }
+            if (historyOk) {
+                localStorage.removeItem(STORAGE_KEY);
+                logPanel(`  📚 История: перенесено ${historyCount} дней`, 'info');
+            } else {
+                logPanel(`  ⚠️ История: перенесено ${historyCount}, ошибок ${historyFailed} — LS НЕ удалён`, 'warn');
+            }
+        } catch (e) {
+            historyOk = false;
+            logPanel('  ❌ Ошибка миграции истории: ' + e.message, 'error');
+        }
+    }
+
+    // ---- Кэш реплеев ----
+    if (hasLsReplays) {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(REPLAY_CACHE_KEY));
+            for (const [replayId, value] of Object.entries(parsed)) {
+                if (!replayId || !value) continue;
+                const ok = await cwIdb.put(IDB_STORE_REPLAYS, replayId, value);
+                if (ok) replaysCount++;
+                else { replaysFailed++; replaysOk = false; }
+            }
+            if (replaysOk) {
+                localStorage.removeItem(REPLAY_CACHE_KEY);
+                logPanel(`  📼 Кэш реплеев: перенесено ${replaysCount} записей`, 'info');
+            } else {
+                logPanel(`  ⚠️ Реплеи: перенесено ${replaysCount}, ошибок ${replaysFailed} — LS НЕ удалён`, 'warn');
+            }
+        } catch (e) {
+            replaysOk = false;
+            logPanel('  ❌ Ошибка миграции реплеев: ' + e.message, 'error');
+        }
+    }
+
+    // 🔥 Флаг 'done' ставим ТОЛЬКО если всё прошло успешно
+    if (historyOk && replaysOk) {
+        localStorage.setItem(MIGRATION_FLAG, 'done');
+        logPanel('✅ Миграция завершена, старые LS-ключи удалены', 'success');
+    } else {
+        logPanel('⚠️ Миграция неполная: LS-ключи сохранены, повторим при следующем запуске', 'warn');
+    }
+}
+
+/* ================================================================ /
+/ 📚 Загрузка истории из IDB в память                              /
+/ ================================================================ */
+async function loadHistoryFromIdb() {
+    const keys = await cwIdb.getAllKeys(IDB_STORE_HISTORY);
+    const result = {};
+    for (const k of keys) {
+        const battles = await cwIdb.get(IDB_STORE_HISTORY, k);
+        if (Array.isArray(battles) && battles.length > 0) result[k] = battles;
+    }
+    return result;
+}
+
+/* ================================================================ /
+/ 💾 Сохранение истории в IDB (по дням — только изменённые дни)    /
+/ ================================================================ */
+function compareHistoryKeys(a, b) {
+    const [sa, da] = a.split('_').map(n => parseInt(n, 10));
+    const [sb, db] = b.split('_').map(n => parseInt(n, 10));
+    if (sa !== sb) return sb - sa;  // новые сезоны вперёд
+    return db - da;                 // новые дни вперёд
+}
+
+async function saveHistoryToIdb(history, changedKeys = null) {
+    const keys = Object.keys(history).sort(compareHistoryKeys);
+    const kept = keys.slice(0, MAX_HISTORY_DAYS);
+    const existing = new Set(await cwIdb.getAllKeys(IDB_STORE_HISTORY));
+
+    let saved = 0, cleaned = 0;
+    for (const k of kept) {
+        const cleanKey = k.trim();
+
+        // 🔥 Если день не менялся и уже есть в IDB — пропускаем
+        if (changedKeys && !changedKeys.has(cleanKey) && existing.has(cleanKey)) {
+            existing.delete(cleanKey);
+            continue;
+        }
+
+        const battles = Array.isArray(history[k]) ? history[k] : [];
+        const cleanBattles = battles.filter(b => !isEmptyBattle(b));
+        cleaned += battles.length - cleanBattles.length;
+
+        const seen = new Set();
+        const deduped = cleanBattles.filter(b => {
+            if (seen.has(b.replayId)) return false;
+            seen.add(b.replayId);
+            return true;
+        });
+
+        if (deduped.length > 0) {
+            await cwIdb.put(IDB_STORE_HISTORY, cleanKey, deduped);
+            saved++;
+        }
+        existing.delete(cleanKey);
+    }
+
+    for (const k of existing) await cwIdb.delete(IDB_STORE_HISTORY, k);
+
+    if (cleaned > 0) logPanel(`🧹 При сохранении очищено ${cleaned} "пустых" боёв`, 'info');
+    logPanel(`💾 База истории: записано ${saved} дней (макс. ${MAX_HISTORY_DAYS})`, 'info');
+}
+
+/* ================================================================  /
+/  📊 ПРОВЕРКА ОБЪЁМА IDB                                 /
+/  ================================================================ */
+async function checkStorageSize() {
+    try {
+        const histKeys = await cwIdb.getAllKeys(IDB_STORE_HISTORY);
+        const replayKeys = await cwIdb.getAllKeys(IDB_STORE_REPLAYS);
+
+        let usageMB = '—';
+        if (navigator.storage?.estimate) {
+            const { usage } = await navigator.storage.estimate();
+            usageMB = (usage / 1024 / 1024).toFixed(2);
+        }
+
+        console.group(`%c[HWH CW Auto] 📊 Состояние IndexedDB`, 'color: #ffd24d; font-weight: bold');
+        console.log(`📚 История: ${histKeys.length} дней`);
+        console.log(`📼 Кэш реплеев: ${replayKeys.length} записей (макс. ${MAX_REPLAY_CACHE_ENTRIES})`);
+        console.log(`📦 Использовано браузером (общая оценка): ${usageMB} МБ`);
+        console.groupEnd();
+    } catch (e) {
+        console.error('[HWH CW Auto] Ошибка проверки IDB:', e);
+    }
+}
+async function initStorage() {
+    await cwIdb.open();
+    await migrateLocalStorageToIdb();
+    await reloadReplayCache();
+    await checkStorageSize();
+}
+
+
+
+/* ================================================================= /
+/ 📼 КЭШ РЕПЛЕЕВ                                                    /
 / ================================================================ */
 const replayMemoryCache = new Map();
-let replayStorageCache = null;
+let replayStorageCache = null;  // заполняется из IDB при старте
 let replayStorageDirty = false;
+const dirtyReplayIds = new Set();  // 🔥 записываем в IDB только изменённые
 
-function loadReplayCache() {
+async function loadReplayCache() {
     try {
-        const data = localStorage.getItem(REPLAY_CACHE_KEY);
-        return data ? JSON.parse(data) : {};
+        const keys = await cwIdb.getAllKeys(IDB_STORE_REPLAYS);
+        const result = {};
+        for (const k of keys) {
+            const v = await cwIdb.get(IDB_STORE_REPLAYS, k);
+            if (v) result[k] = v;
+        }
+        return result;
     } catch (e) {
         console.error('[HWH CW Auto] Ошибка загрузки кэша реплеев:', e);
         return {};
     }
 }
 
-function saveReplayCache(cache) {
+async function saveReplayCache(cache) {
     try {
-        const keys = Object.keys(cache);
-        if (keys.length > MAX_REPLAY_CACHE_ENTRIES) {
-            const pruned = {};
-            keys.slice(-MAX_REPLAY_CACHE_ENTRIES).forEach(k => pruned[k] = cache[k]);
-            cache = pruned;
+        // Точечно сохраняем только "грязные" ключи
+        if (dirtyReplayIds.size > 0) {
+            for (const id of dirtyReplayIds) {
+                if (cache[id]) {
+                    await cwIdb.put(IDB_STORE_REPLAYS, id, cache[id]);
+                } else {
+                    await cwIdb.delete(IDB_STORE_REPLAYS, id);
+                }
+            }
+            dirtyReplayIds.clear();
         }
-        localStorage.setItem(REPLAY_CACHE_KEY, JSON.stringify(cache));
+        await cwIdb.pruneReplays(MAX_REPLAY_CACHE_ENTRIES);
         return true;
     } catch (e) {
         console.error('[HWH CW Auto] Ошибка сохранения кэша реплеев:', e);
@@ -138,30 +407,34 @@ function saveReplayCache(cache) {
     }
 }
 
-function getReplayStorageCache() {
+async function getReplayStorageCache() {
     if (replayStorageCache === null) {
-        replayStorageCache = loadReplayCache();
+        replayStorageCache = await loadReplayCache();
     }
     return replayStorageCache;
 }
 
-function reloadReplayCache() {
-    replayStorageCache = loadReplayCache();
+async function reloadReplayCache(force = false) {
+    if (!force && replayStorageCache !== null) {
+        logDebug('🔄 Кэш реплеев уже загружен, пропускаем перечитывание');
+        return;
+    }
+    replayStorageCache = await loadReplayCache();
     replayMemoryCache.clear();
     for (const [k, v] of Object.entries(replayStorageCache)) {
         replayMemoryCache.set(k, v);
     }
     replayStorageDirty = false;
-    logPanel(`🔄 Кэш реплеев перечитан в память: ${replayMemoryCache.size} записей`, 'info');
+    dirtyReplayIds.clear();
+    logPanel(`🔄 Кэш реплеев перечитан: ${replayMemoryCache.size} записей`, 'info');
 }
 
-function flushReplayCache() {
+async function flushReplayCache() {
     if (replayStorageDirty && replayStorageCache) {
-        const success = saveReplayCache(replayStorageCache);
+        const success = await saveReplayCache(replayStorageCache);
         if (success) {
             replayStorageDirty = false;
-            const count = Object.keys(replayStorageCache).length;
-            logPanel(`💾 Кэш реплеев сохранён: ${count} записей`, 'info');
+            logPanel(`💾 Кэш реплеев сохранён: ${Object.keys(replayStorageCache).length} записей`, 'info');
         }
     }
 }
@@ -175,7 +448,7 @@ async function getReplayInfo(replayId) {
     if (replayMemoryCache.has(replayId)) return replayMemoryCache.get(replayId);
 
     // 2. Проверяем кэш в localStorage
-    const storageCache = getReplayStorageCache();
+    const storageCache = await getReplayStorageCache();
     if (storageCache[replayId]) {
         const cached = storageCache[replayId];
         replayMemoryCache.set(replayId, cached);
@@ -214,7 +487,7 @@ async function getReplayInfo(replayId) {
         replayMemoryCache.set(replayId, result);
         storageCache[replayId] = result;
         replayStorageDirty = true;
-        
+        dirtyReplayIds.add(replayId);  // 🔥 помечаем для точечной записи
         logDebug(`📼 Реплей ${replayId}: загружен с сервера и сохранён в кэш`);
         for (const d of result.defenders) {
             logDebug(`   🛡️ [${d.teamType}] пачка=[${d.teamString}] → ${d.teamNames}`);
@@ -229,55 +502,41 @@ async function getReplayInfo(replayId) {
 /* ================================================================ /
 / 🗄️ РАБОТА С ЛОКАЛЬНОЙ БАЗОЙ ИСТОРИИ                            /
 / ================================================================ */
-function loadHistory() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
-    catch (e) { logPanel('Ошибка чтения истории, начинаем с нуля', 'warn'); return {}; }
+async function loadHistory() {
+    if (!cwIdb.available) {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+        catch (e) { return {}; }
+    }
+    try { return await loadHistoryFromIdb(); }
+    catch (e) { logPanel('Ошибка чтения истории: ' + e.message, 'warn'); return {}; }
 }
+
+async function saveHistory(history, changedKeys = null) {
+    if (!cwIdb.available) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(history)); }
+        catch (e) { logPanel('Ошибка сохранения в LS: ' + e.message, 'error'); }
+        return;
+    }
+    try { await saveHistoryToIdb(history, changedKeys); }
+    catch (e) { logPanel('Ошибка сохранения истории: ' + e.message, 'error'); }
+}
+
 function isEmptyBattle(battle) {
     if (!battle || typeof battle !== 'object') return true;
     const replayId = String(battle.replayId ?? '');
     return replayId === '0' || replayId === '';
 }
-function saveHistory(history) {
-    try {
-        const keys = Object.keys(history).sort().reverse();
-        const pruned = {};
-        let cleanedCount = 0;
-        keys.slice(0, MAX_HISTORY_DAYS).forEach(k => {
-            const cleanKey = k.trim();
-            const battles = Array.isArray(history[k]) ? history[k] : [];
-            const cleanBattles = battles.filter(b => !isEmptyBattle(b));
-            if (cleanBattles.length < battles.length) cleanedCount += (battles.length - cleanBattles.length);
-            if (cleanBattles.length > 0) {
-                if (!pruned[cleanKey]) pruned[cleanKey] = [];
-                pruned[cleanKey].push(...cleanBattles);
-            }
-        });
-        for (const k in pruned) {
-            const seen = new Set();
-            pruned[k] = pruned[k].filter(b => {
-                if (seen.has(b.replayId)) return false;
-                seen.add(b.replayId);
-                return true;
-            });
-        }
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(pruned));
-        let totalBattles = 0;
-        for (const key of Object.keys(pruned)) totalBattles += pruned[key].length;
-        if (cleanedCount > 0) logPanel(`🧹 При сохранении очищено ${cleanedCount} "пустых" боёв`, 'info');
-        logPanel(`💾 База истории: ${Object.keys(pruned).length} дней (макс. ${MAX_HISTORY_DAYS}), ${totalBattles} битв`, 'info');
-    } catch (e) {
-        logPanel('Ошибка сохранения истории: ' + e.message, 'error');
-    }
-}
+
 function isFullWin(battle) {
     if (!battle.win) return false;
     if (battle.slotPoints === undefined || battle.slotPoints === null) return true;
     return battle.slotPoints === 20;
 }
-function mergeAndSaveHistory(newData) {
-    const history = loadHistory();
+async function mergeAndSaveHistory(newData) {
+    const history = await loadHistory();
     let updated = false, newBattles = 0, skippedDuplicates = 0, skippedEmpty = 0, skippedEmptyDays = 0;
+    const changedKeys = new Set();  // 🔥
+
     for (const [key, battles] of Object.entries(newData)) {
         const validNewBattles = [];
         const existingReplays = new Set((history[key] || []).map(b => b.replayId));
@@ -306,8 +565,10 @@ function mergeAndSaveHistory(newData) {
         history[key].push(...validNewBattles);
         newBattles += validNewBattles.length;
         updated = true;
+        changedKeys.add(key.trim());  // 🔥
     }
-    if (updated) saveHistory(history);
+
+    if (updated) await saveHistory(history, changedKeys);  // 🔥
     if (newBattles > 0 || skippedDuplicates > 0 || skippedEmpty > 0) {
         let msg = `📥 Новых боёв: ${newBattles}`;
         if (skippedDuplicates > 0) msg += `, дубликатов: ${skippedDuplicates}`;
@@ -321,12 +582,11 @@ function mergeAndSaveHistory(newData) {
 /* ================================================================ /
 / 💾 ЭКСПОРТ / 📂 ИМПОРТ (ИСТОРИЯ + КЭШ РЕПЛЕЕВ)                  /
 / ================================================================ */
-function exportHistory() {
+async function exportHistory() {
     try {
-        const historyRaw = localStorage.getItem(STORAGE_KEY) || '{}';
-        const replayRaw = localStorage.getItem(REPLAY_CACHE_KEY) || '{}';
-        const historyParsed = JSON.parse(historyRaw);
-        const replayParsed = JSON.parse(replayRaw);
+        const historyParsed = await loadHistory();
+        const replayParsed = await getReplayStorageCache();
+
         const historyDays = Object.keys(historyParsed).length;
         const replayCount = Object.keys(replayParsed).length;
         if (historyDays === 0 && replayCount === 0) {
@@ -356,7 +616,7 @@ function exportHistory() {
     }
 }
 
-function importHistory() {
+async function importHistory() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json,application/json';
@@ -371,6 +631,7 @@ function importHistory() {
                 throw new Error('Неверный формат: ожидается JSON-объект');
             }
 
+            // ---- Разбор формата файла ----
             let historyData = null;
             let replayData = null;
 
@@ -397,6 +658,7 @@ function importHistory() {
                 }
             }
 
+            // ---- Импорт истории ----
             let historyMsg = '';
             if (historyData) {
                 let validEntries = 0, skippedEmpty = 0;
@@ -404,11 +666,14 @@ function importHistory() {
                     if (!Array.isArray(value)) throw new Error(`Неверный формат данных в ключе истории: ${key}`);
                     validEntries++;
                 }
-                const existing = loadHistory();
+
+                const existing = await loadHistory();
                 const merged = { ...existing };
+                const changedKeys = new Set();   // 🔥 только реально изменённые дни
+
                 for (const [key, battles] of Object.entries(historyData)) {
-                    const validNewBattles = [];
                     const existingReplays = new Set((merged[key] || []).map(b => b.replayId));
+                    const validNewBattles = [];
                     for (const b of battles) {
                         if (isEmptyBattle(b)) { skippedEmpty++; continue; }
                         if (b && b.replayId && !existingReplays.has(b.replayId)) {
@@ -419,37 +684,46 @@ function importHistory() {
                     if (validNewBattles.length === 0) continue;
                     if (!merged[key]) merged[key] = [];
                     merged[key].push(...validNewBattles);
+                    changedKeys.add(key.trim());
                 }
-                saveHistory(merged);
+
+                await saveHistory(merged, changedKeys);
+
                 let totalBattles = 0;
                 for (const key of Object.keys(merged)) totalBattles += merged[key].length;
                 historyMsg = `история: ${validEntries} дн., ${totalBattles} битв`;
                 if (skippedEmpty > 0) historyMsg += `, пропущено пустых: ${skippedEmpty}`;
             }
 
+            // ---- Импорт кэша реплеев ----
             let replayMsg = '';
             if (replayData) {
-                const existingCache = getReplayStorageCache();
+                const existingCache = await getReplayStorageCache();
                 let newCount = 0, skippedDuplicates = 0;
+
                 for (const [replayId, value] of Object.entries(replayData)) {
                     if (!replayId || !value) { skippedDuplicates++; continue; }
                     if (existingCache[replayId]) { skippedDuplicates++; continue; }
                     existingCache[replayId] = value;
+                    dirtyReplayIds.add(replayId);           // 🔥 точечная запись в IDB
+                    if (!replayMemoryCache.has(replayId)) {
+                        replayMemoryCache.set(replayId, value);
+                    }
                     newCount++;
                 }
-                const saveOk = saveReplayCache(existingCache);
+
+                const saveOk = await saveReplayCache(existingCache);
                 if (saveOk) {
                     replayStorageCache = existingCache;
-                    for (const [k, v] of Object.entries(replayData)) {
-                        if (!replayMemoryCache.has(k)) replayMemoryCache.set(k, v);
-                    }
-                    replayMsg = `кэш реплеев: +${newCount} новых записей (всего ${Object.keys(existingCache).length})`;
+                    replayStorageDirty = false;
+                    replayMsg = `кэш реплеев: +${newCount} новых (всего ${Object.keys(existingCache).length})`;
                     if (skippedDuplicates > 0) replayMsg += `, дубликатов: ${skippedDuplicates}`;
                 } else {
-                    replayMsg = 'кэш реплеев: ошибка сохранения (возможно, переполнен localStorage)';
+                    replayMsg = 'кэш реплеев: ошибка сохранения (IDB недоступен?)';
                 }
             }
 
+            // ---- Итог ----
             const parts = [];
             if (historyMsg) parts.push(historyMsg);
             if (replayMsg) parts.push(replayMsg);
@@ -458,7 +732,8 @@ function importHistory() {
             } else {
                 logPanel(`📂 Импортировано из "${file.name}": ${parts.join(' | ')}`, 'success');
             }
-            checkStorageSize();
+
+            await checkStorageSize();
         } catch (err) {
             logPanel('❌ Ошибка импорта: ' + err.message, 'error');
         } finally {
@@ -751,7 +1026,7 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
                 if (replayMemoryCache.has(b.replayId)) {
                     ri = replayMemoryCache.get(b.replayId);
                 } else {
-                    const storageCache = getReplayStorageCache();
+                    const storageCache = await getReplayStorageCache();
                     if (storageCache[b.replayId]) {
                         ri = storageCache[b.replayId];
                         replayMemoryCache.set(b.replayId, ri);
@@ -814,7 +1089,6 @@ async function buildPackIndex(mergedHistory, maxNew = 300) {
     logPanel(msg, 'info');
     return { idx, enrichedCount };
 }
-
 /* ================================================================ /
 / 🔥 v4.43: ПОИСК АЛЬТЕРНАТИВНЫХ НАЗНАЧЕНИЙ                       /
 / Учитывает уже занятые попытки (available вместо total)          /
@@ -931,7 +1205,7 @@ async function assignAlternatives(alternatives, guildMembers, usedTries, already
     logPanel(`🔄 Альтернативно назначено: ${count} целей`, 'highlight');
     setPanelTitle(`⚔️ Готово: ${count} альт-назначений`);
     if (altBtn) altBtn.disabled = true;
-    checkStorageSize();
+    await checkStorageSize();
     scheduleAutoClose();
 }
 
@@ -949,11 +1223,11 @@ async function findAndAssignAlternatives(allSlots, assigned, guildMembers, usedT
         const { idx: packIndex, enrichedCount } = await buildPackIndex(mergedHistory);
 
         if (enrichedCount > 0) {
-            saveHistory(mergedHistory);
-            flushReplayCache();
+            await saveHistory(mergedHistory);
+            await flushReplayCache();
             logPanel(`💾 История обогащена (+${enrichedCount} записей), кэш реплеев обновлён`, 'info');
         } else {
-            flushReplayCache();
+            await flushReplayCache();
         }
 
         const alternatives = findAlternatives(allSlots, packIndex, guildMembers, usedTries, alreadyAttackedToday, memberNames);
@@ -988,7 +1262,7 @@ async function autoAssignGuildTargets() {
     setProgress(0);
     if (altBtn) { altBtn.disabled = true; altBtn.onclick = null; }
     if (DEBUG_MODE) logDebug('🔧 DEBUG_MODE включён. Расширенные логи выводятся в консоль (F12).');
-
+    await initStorage();
     try {
         if (typeof Caller === 'undefined' || typeof Caller.send === 'undefined') {
             logPanel('⚠️ HeroWarsHelper (Caller) не найден.', 'error');
@@ -998,8 +1272,8 @@ async function autoAssignGuildTargets() {
 
         logPanel('📜 Обновление базы истории боёв...', 'info');
         setProgress(5);
-        let mergedHistory = loadHistory();
-        let historyKeys = Object.keys(mergedHistory).sort().reverse();
+        let mergedHistory = await loadHistory();
+        let historyKeys = Object.keys(mergedHistory).sort(compareHistoryKeys);
         try {
             const historyList = await Caller.send('clanWarGetAvailableHistory');
             if (historyList?.history?.length) {
@@ -1019,8 +1293,8 @@ async function autoAssignGuildTargets() {
                         logPanel(`Не удалось загрузить день ${hist.season}_${hist.day}`, 'warn');
                     }
                 }
-                mergedHistory = mergeAndSaveHistory(newDataToMerge);
-                historyKeys = Object.keys(mergedHistory).sort().reverse();
+                mergedHistory = await mergeAndSaveHistory(newDataToMerge);
+                historyKeys = Object.keys(mergedHistory).sort(compareHistoryKeys);
             } else {
                 logPanel('⚠️ История боёв от сервера пуста.', 'warn');
             }
@@ -1041,7 +1315,7 @@ async function autoAssignGuildTargets() {
         const cwInfo = await Caller.send('clanWarGetInfo');
         if (!cwInfo || !cwInfo.enemySlots) {
             logPanel('⚠️ Война Гильдий не активна. База истории обновлена.', 'warn');
-            checkStorageSize();
+            await checkStorageSize();
             scheduleAutoClose();
             return;
         }
@@ -1189,13 +1463,13 @@ async function autoAssignGuildTargets() {
         }
         if (guildMembers.filter(m => m.available > 0).length === 0) {
             logPanel('⚠️ Нет попыток для атаки.', 'warn');
-            checkStorageSize();
+            await checkStorageSize();
             scheduleAutoClose();
             return;
         }
         if (freeSlots.size === 0) {
             logPanel('⚠️ Нет свободных слотов.', 'warn');
-            checkStorageSize();
+            await checkStorageSize();
             scheduleAutoClose();
             return;
         }
@@ -1203,6 +1477,7 @@ async function autoAssignGuildTargets() {
         const assigned = [];
         const skipped = [];
         let historyEnriched = false;
+        const enrichedKeys = new Set();   // 🔥 сюда собираем ключи изменённых дней
 
         for (let mi = 0; mi < guildMembers.length; mi++) {
             const member = guildMembers[mi];
@@ -1267,6 +1542,7 @@ async function autoAssignGuildTargets() {
                             teamString: d.teamString
                         }));
                         historyEnriched = true;
+                        enrichedKeys.add(key);   // 🔥
                     }
                     const defenderFreeSlots = [...freeSlots.values()].filter(s => s.defenderId === defenderId);
                     if (defenderFreeSlots.length === 0) {
@@ -1334,12 +1610,11 @@ async function autoAssignGuildTargets() {
             }
             await sleep(100);
         }
-
         if (historyEnriched) {
-            saveHistory(mergedHistory);
-            logPanel('💾 История обогащена данными о защитных пачках', 'info');
+            await saveHistory(mergedHistory, enrichedKeys);   // 🔥 точечно
+            logPanel(`💾 История обогащена в ${enrichedKeys.size} днях`, 'info');
         }
-        flushReplayCache();
+        await flushReplayCache();
 
         for (const a of assigned) {
             allSlots.push({
@@ -1391,7 +1666,7 @@ async function autoAssignGuildTargets() {
             setPanelTitle(`🎯 Готово: ${assigned.length} целей назначено`);
         }
 
-        checkStorageSize();
+        await checkStorageSize();
     } catch (error) {
         logPanel(`💥 Критическая ошибка: ${error.message}`, 'error');
         setPanelTitle('🎯 Ошибка');
