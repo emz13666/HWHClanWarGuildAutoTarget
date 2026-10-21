@@ -53,6 +53,15 @@
 
     const SHOW_ASSIGNMENTS_ON_START = true;
     const POPUP_COOLDOWN_MINUTES    = 30;
+    const SHOW_ON_START_KEY         = 'HWH_CW_ShowOnStart';
+
+/* ================================================================
+/  НАСТРОЙКИ
+/ ================================================================ */
+    function getShowOnStart() {
+        const v = localStorage.getItem(SHOW_ON_START_KEY);
+        return v === null ? SHOW_ASSIGNMENTS_ON_START : v === 'true';
+    }
 
  /* ============================================================
  * РЕЖИМ ВОЙНЫ (только ВГ)
@@ -1481,6 +1490,16 @@
         sizeBtn.title = 'Размер IndexedDB + архивация';
         sizeBtn.addEventListener('click', async (e) => { e.stopPropagation(); cancelAutoClose(); await checkAndArchiveAssignments(); });
         controls.appendChild(sizeBtn);
+
+const settingsBtn = document.createElement('button');
+settingsBtn.className = 'hwh-cw-panel-btn';
+settingsBtn.textContent = '⚙️';
+settingsBtn.title = 'Настройки';
+settingsBtn.addEventListener('click', async (e) => {
+    e.stopPropagation(); cancelAutoClose();
+    await showSettings();
+});
+controls.appendChild(settingsBtn);
 
         const minBtn = document.createElement('button');
         minBtn.className = 'hwh-cw-panel-btn';
@@ -3416,7 +3435,7 @@
     }
 
     async function showMyAssignmentsOnStart() {
-        if (!SHOW_ASSIGNMENTS_ON_START) return;
+        if (!getShowOnStart()) return;
 
         if (!window.__hwhCWLastInfo) {
             try {
@@ -3534,6 +3553,52 @@
         scheduleAutoClose();
     }
 
+async function showSettings() {
+    const checked = getShowOnStart() ? 'checked' : '';
+    const statusColor = getShowOnStart() ? '#7fff7f' : '#ff8a80';
+    const statusText  = getShowOnStart() ? '✅ показывается' : '❌ скрыто';
+
+    const html = `
+        <div style="text-align:left;">
+            <div style="color:#ffd24d;font-weight:bold;font-size:14px;margin-bottom:10px;">⚙️ Настройки</div>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid #8a6d3b;border-radius:6px;background:rgba(138,109,59,.1);">
+                <input type="checkbox" id="hwh-cw-show-on-start" ${checked} style="width:18px;height:18px;cursor:pointer;accent-color:#ffd24d;">
+                <span>Показывать всплывающее окно при входе</span>
+            </label>
+            <div id="hwh-cw-settings-status" style="color:${statusColor};font-size:12px;margin-top:8px;padding-left:4px;">
+                Текущее состояние: ${statusText}
+            </div>
+            <div style="color:#888;font-size:11px;margin-top:8px;padding-left:4px;">
+                При выключении окно с твоими целями не появляется автоматически.
+                Открыть его можно через «📌 Мои назначения» или «📋 Все назначения».
+            </div>
+        </div>
+    `;
+
+    const popupPromise = popup.confirm(html, [{ msg: 'Закрыть', result: 0, color: 'green' }]);
+
+    // Привязываем обработчик после рендера попапа
+    const bindCheckbox = (attempts = 0) => {
+        const cb = document.getElementById('hwh-cw-show-on-start');
+        if (cb) {
+            cb.addEventListener('change', (e) => {
+                localStorage.setItem(SHOW_ON_START_KEY, e.target.checked ? 'true' : 'false');
+                const status = document.getElementById('hwh-cw-settings-status');
+                if (status) {
+                    status.textContent = `Текущее состояние: ${e.target.checked ? '✅ показывается' : '❌ скрыто'}`;
+                    status.style.color = e.target.checked ? '#7fff7f' : '#ff8a80';
+                }
+                console.log(`%c[HWH CW Cascade] ⚙️ Всплывающее окно при входе: ${e.target.checked ? 'включено' : 'отключено'}`,
+                            e.target.checked ? 'color:#7fff7f;' : 'color:#ff8a80;');
+            });
+            return;
+        }
+        if (attempts < 30) setTimeout(() => bindCheckbox(attempts + 1), 50);
+    };
+    setTimeout(() => bindCheckbox(), 50);
+
+    await popupPromise;
+}
     async function showMainActionMenu() {
         const canAssign = await canAssignTargets();
 
@@ -3543,6 +3608,7 @@
             buttons.push({ msg: '❌ Снять ВГ', result: 'clear_wg', color: 'orange' });
         }
         buttons.push({ msg: '📋 Открыть панель', result: 'open_panel', color: 'brown' });
+        buttons.push({ msg: '⚙️ Настройки', result: 'settings', color: 'brown' });
 
         let header = '<b style="color:#ffd24d;font-size:15px;">Выберите действие:</b>';
         if (!canAssign) {
@@ -3558,6 +3624,7 @@
 
         if (answer === 'assign_wg') await autoAssignGuildTargets();
         else if (answer === 'clear_wg') await clearAllAssignments();
+        else if (answer === 'settings') await showSettings();
         else if (answer === 'open_panel') {
             createPanel();
             if (panel && panelMinimized) {
@@ -3608,7 +3675,7 @@
         const showPopup = async () => {
             if (popupShown) return;
             popupShown = true;
-            if (!SHOW_ASSIGNMENTS_ON_START) return;
+            if (!getShowOnStart()) return;
             try { await showMyAssignmentsOnStart(); } catch (e) { console.warn(e); }
         };
 
