@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии (каскадный подбор целей)
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.58
+// @version      4.59
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666, Nemo with AI
@@ -2441,7 +2441,7 @@
                     );
                 }
             }
-            return [];
+            return { assigned: [], indexes: null };
         }
         const activeMembers = guildMembers.filter(m => m.available > 0).length;
         logPanel(
@@ -2538,7 +2538,7 @@
 
         if (freeSlots.size === 0) {
             logPanel(`⚠️ ${modeLabel}: свободных слотов нет.`, 'warn');
-            return [];
+            return { assigned: [], indexes: null };
         }
 
         const heroSlots = [...freeSlots.values()].filter(s => s.slotType === 'hero').length;
