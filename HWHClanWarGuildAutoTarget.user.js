@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии (каскадный подбор целей)
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.61
+// @version      4.62
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666, Nemo with AI
@@ -57,6 +57,7 @@
     const SHOW_ASSIGNMENTS_ON_START = true;
     const POPUP_COOLDOWN_MINUTES    = 30;
     const SHOW_ON_START_KEY         = 'HWH_CW_ShowOnStart';
+    const NO_UNIT_LEVELS_KEY        = 'HWH_CW_NoUnitLevelsInClipboard';
 
 /* ================================================================
 /  НАСТРОЙКИ
@@ -64,6 +65,9 @@
     function getShowOnStart() {
         const v = localStorage.getItem(SHOW_ON_START_KEY);
         return v === null ? SHOW_ASSIGNMENTS_ON_START : v === 'true';
+    }
+    function getNoUnitLevels() {
+    return localStorage.getItem(NO_UNIT_LEVELS_KEY) === 'true';
     }
 
  /* ============================================================
@@ -3315,6 +3319,7 @@ controls.appendChild(settingsBtn);
                 { msg: 'Ок', result: 'ok', isCancel: true },
             ]);
             if (answer === 'copy') {
+                const noLevels = getNoUnitLevels();
                 const textLines = records.map(r => {
                     const b = { exact: '✅', sameDefenderMinor: '⚠️ ~пит', otherDefenderExact: '🔄 ≠ID', otherDefenderMinor: '🔄⚠️ ≠ID~пит' };
                     const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
@@ -3324,13 +3329,16 @@ controls.appendChild(settingsBtn);
                         extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
                     }
                     if (r.replayId) {
-                        extraInfo += ` | 🔗 https://www.hero-wars.com/?replay_id=${r.replayId}`;
+                        extraInfo += ` | 🔗 hero-wars.com/?replay_id=${r.replayId}`;
                     }
 
                     let line = `📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${b[r.matchLevel] || ''}${extraInfo}\n   ⚔️ Атакует: ${r.memberName}`;
                     if (r.attackerUnits && r.attackerUnits.length) {
                         const units = r.attackerUnits.map(u => {
-                            let p = `${u.name} L${u.level || ''} ★${u.star || ''}`;
+                            let p = u.name;
+                            if (!noLevels) {
+                                p += ` L${u.level || ''} ★${u.star || ''}`;
+                            }
                             if (u.petId) p += ` (${getHeroName(u.petId)})`;
                             return p;
                         }).join(', ');
@@ -3533,45 +3541,48 @@ controls.appendChild(settingsBtn);
         return html;
     }
 
-    function formatAssignmentsAsText(records, season, day) {
-        if (records.length === 0) return '';
-        const badge = {
-            exact: '✅',
-            sameDefenderMinor: '⚠️ ~пит',
-            otherDefenderExact: '🔄 ≠ID',
-            otherDefenderMinor: '🔄⚠️ ≠ID~пит',
-        };
-        const where = whereLabel(season, day);
-        const lines = [`🎯 Мои цели (${WAR_MODE_LABEL}, ${where}):`, ''];
-        for (const r of records) {
-            const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
+function formatAssignmentsAsText(records, season, day) {
+    if (records.length === 0) return '';
+    const badge = {
+        exact: '✅',
+        sameDefenderMinor: '⚠️ ~пит',
+        otherDefenderExact: '🔄 ≠ID',
+        otherDefenderMinor: '🔄⚠️ ≠ID~пит',
+    };
+    const noLevels = getNoUnitLevels();
+    const where = whereLabel(season, day);
+    const lines = [`🎯 Мои цели (${WAR_MODE_LABEL}, ${where}):`, ''];
+    for (const r of records) {
+        const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
 
-            let extraInfo = '';
-            if (typeof r.winProbability === 'number') {
-                extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
-            }
-            if (r.replayId) {
-                extraInfo += ` | 🔗 hero-wars.com/?replay_id=${r.replayId}`;
-            }
+        let extraInfo = '';
+        if (typeof r.winProbability === 'number') {
+            extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
+        }
+        if (r.replayId) {
+            extraInfo += ` | 🔗 hero-wars.com/?replay_id=${r.replayId}`;
+        }
 
-            lines.push(`📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${badge[r.matchLevel] || ''}${extraInfo}`);
-            if (r.attackerUnits && r.attackerUnits.length) {
-                const units = r.attackerUnits.map(u => {
-                    const p = [u.name];
+        lines.push(`📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${badge[r.matchLevel] || ''}${extraInfo}`);
+        if (r.attackerUnits && r.attackerUnits.length) {
+            const units = r.attackerUnits.map(u => {
+                const p = [u.name];
+                if (!noLevels) {
                     if (u.level) p.push(`L${u.level}`);
                     if (u.star) p.push(`★${u.star}`);
-                    if (u.power) p.push(`${Math.round(u.power / 1000)}k`);
-                    if (u.petId) p.push(`(${getHeroName(u.petId)})`);
-                    return p.join(' ');
-                });
-                lines.push(`   ⚔️ ${units.join(', ')}`);
-            } else {
-                lines.push(`   ⚔️ состав не сохранён (replayId: ${r.replayId || '?'})`);
-            }
-            lines.push('');
+                }
+                if (u.power) p.push(`${Math.round(u.power / 1000)}k`);
+                if (u.petId) p.push(`(${getHeroName(u.petId)})`);
+                return p.join(' ');
+            });
+            lines.push(`   ⚔️ ${units.join(', ')}`);
+        } else {
+            lines.push(`   ⚔️ состав не сохранён (replayId: ${r.replayId || '?'})`);
         }
-        return lines.join('\n');
+        lines.push('');
     }
+    return lines.join('\n');
+}
 
     function copyAssignmentsToClipboard(records, season, day) {
         const text = formatAssignmentsAsText(records, season, day);
@@ -3701,33 +3712,43 @@ controls.appendChild(settingsBtn);
     }
 
 async function showSettings() {
-    const checked = getShowOnStart() ? 'checked' : '';
-    const statusColor = getShowOnStart() ? '#7fff7f' : '#ff8a80';
-    const statusText  = getShowOnStart() ? '✅ показывается' : '❌ скрыто';
+    const showOnStart = getShowOnStart();
+    const noUnitLevels = getNoUnitLevels();
+    const statusColor = showOnStart ? '#7fff7f' : '#ff8a80';
+    const statusText  = showOnStart ? '✅ показывается' : '❌ скрыто';
 
     const html = `
         <div style="text-align:left;">
             <div style="color:#ffd24d;font-weight:bold;font-size:14px;margin-bottom:10px;">⚙️ Настройки</div>
-            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid #8a6d3b;border-radius:6px;background:rgba(138,109,59,.1);">
-                <input type="checkbox" id="hwh-cw-show-on-start" ${checked} style="width:18px;height:18px;cursor:pointer;accent-color:#ffd24d;">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid #8a6d3b;border-radius:6px;background:rgba(138,109,59,.1);margin-bottom:8px;">
+                <input type="checkbox" id="hwh-cw-show-on-start" ${showOnStart ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:#ffd24d;">
                 <span>Показывать всплывающее окно при входе</span>
             </label>
-            <div id="hwh-cw-settings-status" style="color:${statusColor};font-size:12px;margin-top:8px;padding-left:4px;">
+            <div id="hwh-cw-settings-status" style="color:${statusColor};font-size:12px;margin-top:2px;margin-bottom:12px;padding-left:4px;">
                 Текущее состояние: ${statusText}
             </div>
-            <div style="color:#888;font-size:11px;margin-top:8px;padding-left:4px;">
-                При выключении окно с твоими целями не появляется автоматически.
-                Открыть его можно через «📌 Мои назначения» или «📋 Все назначения».
+
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid #8a6d3b;border-radius:6px;background:rgba(138,109,59,.1);">
+                <input type="checkbox" id="hwh-cw-no-unit-levels" ${noUnitLevels ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;accent-color:#ffd24d;">
+                <span>Копировать в буфер без уровня и звёздности героев</span>
+            </label>
+            <div style="color:#888;font-size:11px;margin-top:6px;padding-left:4px;">
+                При включении из текста для копирования убираются отметки <b>L130 ★6</b>. Питомцы, сила и покровители остаются.
+            </div>
+            <div style="color:#888;font-size:11px;margin-top:10px;padding-left:4px;">
+                Окно с твоими целями можно открыть вручную через «📌 Мои назначения» или «📋 Все назначения».
             </div>
         </div>
     `;
 
     const popupPromise = popup.confirm(html, [{ msg: 'Закрыть', result: 0, color: 'green' }]);
 
-    const bindCheckbox = (attempts = 0) => {
-        const cb = document.getElementById('hwh-cw-show-on-start');
-        if (cb) {
-            cb.addEventListener('change', (e) => {
+    const bindSettings = (attempts = 0) => {
+        const cbShow = document.getElementById('hwh-cw-show-on-start');
+        const cbNoLevels = document.getElementById('hwh-cw-no-unit-levels');
+
+        if (cbShow) {
+            cbShow.addEventListener('change', (e) => {
                 localStorage.setItem(SHOW_ON_START_KEY, e.target.checked ? 'true' : 'false');
                 const status = document.getElementById('hwh-cw-settings-status');
                 if (status) {
@@ -3737,11 +3758,20 @@ async function showSettings() {
                 console.log(`%c[HWH CW Cascade] ⚙️ Всплывающее окно при входе: ${e.target.checked ? 'включено' : 'отключено'}`,
                             e.target.checked ? 'color:#7fff7f;' : 'color:#ff8a80;');
             });
-            return;
         }
-        if (attempts < 30) setTimeout(() => bindCheckbox(attempts + 1), 50);
+
+        if (cbNoLevels) {
+            cbNoLevels.addEventListener('change', (e) => {
+                localStorage.setItem(NO_UNIT_LEVELS_KEY, e.target.checked ? 'true' : 'false');
+                console.log(`%c[HWH CW Cascade] ⚙️ Копирование без уровня/звёзд: ${e.target.checked ? 'включено' : 'отключено'}`,
+                            e.target.checked ? 'color:#7fff7f;' : 'color:#ff8a80;');
+            });
+        }
+
+        if (cbShow && cbNoLevels) return;
+        if (attempts < 30) setTimeout(() => bindSettings(attempts + 1), 50);
     };
-    setTimeout(() => bindCheckbox(), 50);
+    setTimeout(() => bindSettings(), 50);
 
     await popupPromise;
 }
