@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии (каскадный подбор целей)
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.60
+// @version      4.61
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666, Nemo with AI
@@ -41,6 +41,9 @@
 
     const AUTO_CLOSE_DELAY_SECONDS = 10;
     const DEBUG_MODE               = true;
+
+    const SIM_COUNT_PROBABILITY    = 10;
+    const SIM_YIELD_PROBABILITY_MS = 50;
 
     const AUTO_ASSIGN_MATCH_MODE       = 'cascade';
     const CASCADE_MIN_WINS             = 1;
@@ -179,6 +182,40 @@
 /  УТИЛИТЫ
 / ================================================================ */
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    async function calcProbability(battle, N = SIM_COUNT_PROBABILITY, yieldMs = SIM_YIELD_PROBABILITY_MS) {
+        if (!battle || typeof globalThis.Calc !== 'function') return null;
+        if (!battle.type && !battle.effects?.battleConfig) {
+            console.warn('[HWH CW Cascade] battle.type отсутствует — симуляция может упасть');
+        }
+        let wins = 0, total = 0;
+        for (let i = 0; i < N; i++) {
+            try {
+                const sim = structuredClone(battle);
+                sim.seed = Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 1e6);
+                sim.progress = [{ attackers: { input: ['auto', 0, 0, 'auto', 0, 0] } }];
+                const r = await globalThis.Calc(sim);
+                total++;
+                if (r?.result?.win) wins++;
+            } catch (e) {
+                console.warn('[HWH CW Cascade] симуляция упала:', e.message);
+            }
+            await sleep(yieldMs);
+        }
+        if (total === 0) return null;
+        return wins / total;
+    }
+
+    function findBattleInHistory(history, replayId) {
+        if (!history || !replayId) return null;
+        const rid = String(replayId);
+        for (const key in history) {
+            for (const b of (history[key] || [])) {
+                if (String(b.replayId) === rid) return { battle: b, key };
+            }
+        }
+        return null;
+    }
 
     function compareHistoryKeys(a, b) {
         const parse = (k) => {
@@ -343,7 +380,7 @@
 
     const cwIdb = new CwIdb();
 
-    /* ================================================================
+/* ================================================================
 /  МИГРАЦИЯ localStorage → IndexedDB
 / ================================================================ */
     async function migrateLocalStorageToIdb() {
@@ -539,7 +576,8 @@
                     replayId: battle.replayId,
                     win: battle.win,
                     slotPoints: battle.slotPoints,
-                    time: battle.time
+                    time: battle.time,
+                    winProbability: null,
                 };
                 if (Array.isArray(battle.defenderPacks) && battle.defenderPacks.length > 0) {
                     newBattle.defenderPacks = battle.defenderPacks;
@@ -839,7 +877,6 @@
             if (!this.ready) await this.init();
             if (!this.ready) return null;
 
-            // v4.57: только ВГ-формат ключа.
             const key = `${record.season}_${record.day}_${record.slotId}`;
             record.key = key;
             record.timestamp = record.timestamp || Date.now();
@@ -853,7 +890,6 @@
             const all = await assignmentsDB.getAll();
             return all.filter(r => {
                 if (!r) return false;
-                // v4.57: legacy-записи crossClanWar не показываем в ВГ-списках.
                 const recMode = r.mode || WAR_MODE_CLAN;
                 if (recMode !== WAR_MODE_CLAN) return false;
                 return String(r.season) === String(season) && String(r.day) === String(day);
@@ -902,7 +938,6 @@
         };
     }
 
-    
     function parseClanTries(raw) {
         const def = { heroes: 0, titans: 0 };
         if (raw == null) return def;
@@ -980,7 +1015,6 @@
             }
 
             const allRaw = await assignmentsApi.getAll();
-            // v4.57: статистика и архивация — только для ВГ. Legacy СМ показываем отдельно.
             const all = allRaw.filter(r => r && (r.mode || WAR_MODE_CLAN) === WAR_MODE_CLAN);
             const legacyCount = allRaw.length - all.length;
 
@@ -1207,16 +1241,13 @@
         const t = slotData?.team;
         if (!t) return null;
 
-        // Универсальный сборщик юнитов из любого «контейнера»:
-        // массив, объект с ключами "1"/"2"/..., объект с units/heroes/... и т.п.
         const collectUnits = (source, depth = 0) => {
             if (!source || depth > 3) return [];
             const out = [];
 
             const pushUnit = (u) => {
                 if (!u || typeof u !== 'object') return;
-                if (u.id != null) { out.push(u); return; }   // это юнит
-                // Это контейнер — заходим внутрь
+                if (u.id != null) { out.push(u); return; }
                 for (const v of Object.values(u)) pushUnit(v);
             };
 
@@ -1225,13 +1256,11 @@
                 return out;
             }
             if (typeof source === 'object') {
-                // 1) известные поля-массивы
                 for (const k of ['units', 'members', 'heroes', 'hero', 'titans', 'titan', 'pets', 'pet']) {
                     if (Array.isArray(source[k])) source[k].forEach(u => pushUnit(u));
                 }
                 if (out.length > 0) return out;
 
-                // 2) числовые ключи "1".."6" и подобное
                 const values = Object.values(source);
                 for (const v of values) {
                     if (Array.isArray(v)) v.forEach(u => pushUnit(u));
@@ -1702,12 +1731,13 @@ controls.appendChild(settingsBtn);
         let cancelled = false;
         const enrichedKeys = new Set();
 
-        const addTo = (index, key, attackerId, defenderId, packInfo, attackerInfo, replayId, ts) => {
+        const addTo = (index, key, attackerId, defenderId, packInfo, attackerInfo, replayId, ts, winProb) => {
             if (!index.has(key)) index.set(key, new Map());
             const m = index.get(key);
             if (!m.has(attackerId)) {
                 m.set(attackerId, {
                     wins: 0, lastReplayId: null, lastTimestamp: 0,
+                    winProbability: null,
                     attackerNames: '', defenderNames: '',
                     attackerUnits: [], defenderUnits: [],
                     byDefender: new Map(),
@@ -1722,6 +1752,7 @@ controls.appendChild(settingsBtn);
                 e.defenderNames = packInfo.teamNames || '';
                 e.attackerUnits = attackerInfo.units || [];
                 e.defenderUnits = packInfo.units || [];
+                if (typeof winProb === 'number') e.winProbability = winProb;
             }
             if (!e.byDefender.has(defenderId)) e.byDefender.set(defenderId, { wins: 0, lastReplayId: null });
             const bd = e.byDefender.get(defenderId);
@@ -1738,7 +1769,6 @@ controls.appendChild(settingsBtn);
         let lastProgressPct = 0;
 
         for (const [dayKey, battles] of Object.entries(mergedHistory)) {
-            // v4.57: sm_* история не участвует в ВГ-анализе и не обогащается.
             if (dayKey.startsWith('sm_')) continue;
             if (cancelled) break;
             for (const b of battles) {
@@ -1753,12 +1783,9 @@ controls.appendChild(settingsBtn);
 
                 if (packsHaveUnits) {
                     fromStorage++;
-                    let ri = null;
-
                     if (replayMemoryCache.has(b.replayId)) {
                         const m = replayMemoryCache.get(b.replayId);
                         if (m?.attackers?.[0]?.units?.length && m?.defenders?.[0]?.units?.length) ri = m;
-                        // ↑ требуем ОБА состава, не один
                     }
                     if (!ri) {
                         const sc = await getReplayStorageCache();
@@ -1769,10 +1796,8 @@ controls.appendChild(settingsBtn);
                         }
                     }
                     if (!ri) {
-                        // кэш неполный — догружаем
                         ri = await getReplayInfo(b.replayId);
                         if (ri?.attackers?.[0]?.units?.length && ri?.defenders?.[0]?.units?.length) {
-                            // сохранили полный — обновили defenderPacks в истории
                             b.defenderPacks = ri.defenders.map(d => ({
                                 teamType: d.teamType, teamString: d.teamString,
                                 petId: d.petId, favorStr: d.favorStr, fullSig: d.fullSig,
@@ -1780,7 +1805,7 @@ controls.appendChild(settingsBtn);
                             }));
                             enrichedCount++;
                             enrichedKeys.add(dayKey.trim());
-                            newLoads++;   // ← счётчик реальных загрузок
+                            newLoads++;
                         }
                     }
                     defenders = b.defenderPacks;
@@ -1811,6 +1836,7 @@ controls.appendChild(settingsBtn);
 
                 const attackerInfo = ri?.attackers?.[0] || {};
                 const ts = b.time ? new Date(b.time).getTime() : 0;
+                const wp = (typeof b.winProbability === 'number') ? b.winProbability : null;
 
                 for (const d of defenders) {
                     if (!d.fullSig) {
@@ -1820,10 +1846,10 @@ controls.appendChild(settingsBtn);
                         d.fullSig = `${d.heroes}|${d.petId || ''}|${d.favorStr}`;
                     }
                     const heroes = d.heroes || d.teamString;
-                    addTo(idxByHeroes, `${d.teamType}|${heroes}`, b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts);
-                    addTo(idxByFull, `${d.teamType}|${d.fullSig}`, b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts);
-                    addTo(defenderIdxByHeroes, `${b.defenderId}|${d.teamType}|${heroes}`, b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts);
-                    addTo(defenderIdxByFull, `${b.defenderId}|${d.teamType}|${d.fullSig}`, b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts);
+                    addTo(idxByHeroes,          `${d.teamType}|${heroes}`,              b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts, wp);
+                    addTo(idxByFull,            `${d.teamType}|${d.fullSig}`,           b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts, wp);
+                    addTo(defenderIdxByHeroes,  `${b.defenderId}|${d.teamType}|${heroes}`,    b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts, wp);
+                    addTo(defenderIdxByFull,    `${b.defenderId}|${d.teamType}|${d.fullSig}`,  b.attackerId, b.defenderId, d, attackerInfo, b.replayId, ts, wp);
                 }
             }
         }
@@ -1923,7 +1949,7 @@ controls.appendChild(settingsBtn);
         return { ok, fail };
     }
 
-   
+
     let isAutoEnriching = false;
     async function backgroundAutoEnrich() {
         if (isAutoEnriching) return;
@@ -1934,7 +1960,6 @@ controls.appendChild(settingsBtn);
         isAutoEnriching = true;
 
         try {
-            // v4.57: собираем replayId только из ВГ-истории.
             const history = await loadHistory();
             const vgReplayIds = new Set();
             for (const key in history) {
@@ -2271,7 +2296,7 @@ controls.appendChild(settingsBtn);
             );
             setPanelTitle(`🎯 Готово: ${overallAssigned.length} ${plural(overallAssigned.length, ['назначение', 'назначения', 'назначений'])}`);
             await checkStorageSize();
-            // ── Итоговая статистика и дублирующие предупреждения ──
+
             const stats = await logReplayCacheStats();
 
             if (lastIndexes && lastIndexes.skippedNoData > 0) {
@@ -2425,7 +2450,6 @@ controls.appendChild(settingsBtn);
             const marked = preAssignedTries.get(userId) || 0;
             const alreadyAttacked = attackedTodayCount.get(userId) || 0;
 
-            // v4.57: ВГ — суммарный остаток heroes+titans с капом 2.
             const total = Math.min(2, info.heroes + info.titans);
             const available = Math.max(0, total - marked);
 
@@ -2569,10 +2593,6 @@ controls.appendChild(settingsBtn);
         );
 
         const indexes = await buildPackIndex(mergedHistory);
-        if (indexes.enrichedCount > 0) {
-            await saveHistory(mergedHistory, indexes.enrichedKeys);
-            logPanel(`💾 История обогащена (+${indexes.enrichedCount})`, 'info');
-        }
         await flushReplayCache();
 
         const historyKeys = Object.keys(mergedHistory).sort(compareHistoryKeys);
@@ -2600,6 +2620,7 @@ controls.appendChild(settingsBtn);
         const assigned = [];
         const assignedCount = new Map();
         const slotAssignments = [];
+        const enrichedKeys = new Set();
         const levelOrder = ['exact', 'sameDefenderMinor', 'otherDefenderExact', 'otherDefenderMinor'];
         const levelLabel = {
             exact: '✅',
@@ -2689,6 +2710,30 @@ controls.appendChild(settingsBtn);
                         if (attackerUnits.length) best.entry.attackerUnits = attackerUnits;
                         if (defenderUnits.length) best.entry.defenderUnits = defenderUnits;
 
+                        if ((best.entry.winProbability === null || best.entry.winProbability === undefined) && best.entry.lastReplayId) {
+                            const replayId = best.entry.lastReplayId;
+                            logPanel(`🎲 Дорасчёт шанса победы для ${replayId}...`, 'info');
+                            try {
+                                const replayResp = await Caller.send({ name: 'battleGetReplay', args: { id: replayId } });
+                                if (replayResp?.replay) {
+                                    const prob = await calcProbability(replayResp.replay, SIM_COUNT_PROBABILITY, SIM_YIELD_PROBABILITY_MS);
+                                    if (typeof prob === 'number') {
+                                        best.entry.winProbability = prob;
+                                        logPanel(`📊 Шанс победы ${replayId}: ${Math.round(prob * 100)}%`, 'info');
+                                        const found = findBattleInHistory(mergedHistory, replayId);
+                                        if (found && typeof found.battle.winProbability !== 'number') {
+                                            found.battle.winProbability = prob;
+                                            enrichedKeys.add(found.key.trim());
+                                        }
+                                    } else {
+                                        logPanel(`⚠️ Не удалось рассчитать шанс ${replayId}`, 'warn');
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn('[HWH CW Cascade] Ошибка дорасчёта вероятности:', e);
+                            }
+                        }
+
                         const record = {
                             mode: WAR_MODE_CLAN, season, day: parseInt(day), league,
                             memberId: best.member.id,
@@ -2705,6 +2750,7 @@ controls.appendChild(settingsBtn);
                             fullSig: slot.fullSig,
                             matchLevel: match.level,
                             replayId: best.entry.lastReplayId,
+                            winProbability: (typeof best.entry.winProbability === 'number') ? best.entry.winProbability : null,
                             attackerNames: best.entry.attackerNames,
                             defenderNames: best.entry.defenderNames,
                             attackerUnits,
@@ -2714,10 +2760,17 @@ controls.appendChild(settingsBtn);
                         assigned.push(record);
                         slotAssignments.push(record);
 
+                        const probText = (typeof best.entry.winProbability === 'number')
+                            ? `, шанс: ${Math.round(best.entry.winProbability * 100)}%`
+                            : '';
+                        const replayText = best.entry.lastReplayId
+                            ? ` | 🔗 https://www.hero-wars.com/?replay_id=${best.entry.lastReplayId}`
+                            : '';
+
                         logPanel(
                             `${levelLabel[match.level]} ${memberName} → ${slot.slotLocation}: ` +
-                            `${slot.defenderName} (${best.effectiveWins} ${plural(best.effectiveWins, ['победа', 'победы', 'побед'])}, ` +
-                            `остаток: ${best.availForSlot - 1})`,
+                            `${slot.defenderName} (${best.effectiveWins} ${plural(best.effectiveWins, ['победа', 'победы', 'побед'])}${probText}, ` +
+                            `остаток: ${best.availForSlot - 1})${replayText}`,
                             levelColor[match.level]
                         );
                         if (attackerUnits.length) logTeamDetails('     ⚔️ ', attackerUnits);
@@ -2779,6 +2832,15 @@ controls.appendChild(settingsBtn);
 
                 await sleep(120);
             }
+        }
+
+        const allEnrichedKeys = new Set([
+            ...(indexes?.enrichedKeys || []),
+            ...enrichedKeys,
+        ]);
+        if (allEnrichedKeys.size > 0) {
+            await saveHistory(mergedHistory, allEnrichedKeys);
+            logPanel(`💾 История обновлена (составы + шансы, ${allEnrichedKeys.size} дн.)`, 'info');
         }
 
         for (const rec of slotAssignments) {
@@ -2854,6 +2916,7 @@ controls.appendChild(settingsBtn);
                     attackerUnits: c.entry.attackerUnits,
                     defenderUnits: c.entry.defenderUnits,
                     replayId: c.entry.lastReplayId,
+                    winProbability: (typeof c.entry.winProbability === 'number') ? c.entry.winProbability : null,
                 });
             }
             if (eligible.length > 0) {
@@ -2880,11 +2943,12 @@ controls.appendChild(settingsBtn);
         }
     }
 
-    async function assignAlternatives(alternatives, guildMembers, assignedCount, modeInfo) {
+    async function assignAlternatives(alternatives, guildMembers, assignedCount, modeInfo, mergedHistory) {
         cancelAutoClose();
         if (alternatives.size === 0) return;
         const { season, day, league } = modeInfo;
         let count = 0;
+        const altEnrichedKeys = new Set();
         setPanelTitle('⚔️ Альт-назначения...');
         setProgress(0);
         let idx = 0;
@@ -2913,7 +2977,43 @@ controls.appendChild(settingsBtn);
                         }
                     }
 
-                    logPanel(`✅ Альт: ${alt.attackerName} → ${d.slotInfo.slotLocation}: ${d.slotInfo.defenderName} [${d.level}]`, 'success');
+                    let winProbability = (typeof alt.winProbability === 'number') ? alt.winProbability : null;
+                    if (winProbability === null && alt.replayId) {
+                        logPanel(`🎲 Дорасчёт шанса для альтернативы ${alt.replayId}...`, 'info');
+                        try {
+                            const replayResp = await Caller.send({ name: 'battleGetReplay', args: { id: alt.replayId } });
+                            if (replayResp?.replay) {
+                                const prob = await calcProbability(replayResp.replay, SIM_COUNT_PROBABILITY, SIM_YIELD_PROBABILITY_MS);
+                                if (typeof prob === 'number') {
+                                    winProbability = prob;
+                                    logPanel(`📊 Шанс ${alt.replayId}: ${Math.round(prob * 100)}%`, 'info');
+                                    if (mergedHistory) {
+                                        const found = findBattleInHistory(mergedHistory, alt.replayId);
+                                        if (found && typeof found.battle.winProbability !== 'number') {
+                                            found.battle.winProbability = prob;
+                                            altEnrichedKeys.add(found.key.trim());
+                                        }
+                                    }
+                                } else {
+                                    logPanel(`⚠️ Не удалось рассчитать шанс ${alt.replayId}`, 'warn');
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('[HWH CW Cascade] Ошибка дорасчёта (альт):', e);
+                        }
+                    }
+
+                    const probText = (typeof winProbability === 'number')
+                        ? `, шанс: ${Math.round(winProbability * 100)}%`
+                        : '';
+                    const replayText = alt.replayId
+                        ? ` | 🔗 https://www.hero-wars.com/?replay_id=${alt.replayId}`
+                        : '';
+
+                    logPanel(
+                        `✅ Альт: ${alt.attackerName} → ${d.slotInfo.slotLocation}: ${d.slotInfo.defenderName} [${d.level}]${probText}${replayText}`,
+                        'success'
+                    );
                     if (attackerUnits.length) logTeamDetails('     ⚔️ ', attackerUnits);
                     if (defenderUnits.length) logTeamDetails('     🛡️ ', defenderUnits);
                     if (!attackerUnits.length || !defenderUnits.length) {
@@ -2938,6 +3038,7 @@ controls.appendChild(settingsBtn);
                             fullSig: d.slotInfo.fullSig,
                             matchLevel: d.level,
                             replayId: alt.replayId,
+                            winProbability: (typeof winProbability === 'number') ? winProbability : null,
                             attackerUnits,
                             defenderUnits,
                             slotType: d.slotInfo.slotType,
@@ -2948,6 +3049,12 @@ controls.appendChild(settingsBtn);
             }
             await sleep(150);
         }
+
+        if (altEnrichedKeys.size > 0 && mergedHistory) {
+            await saveHistory(mergedHistory, altEnrichedKeys);
+            logPanel(`💾 Сохранены вероятности альтернатив: ${altEnrichedKeys.size} дн.`, 'info');
+        }
+
         setProgress(100);
         logPanel(`🔄 Альтернативно назначено: ${count} ${plural(count, ['цель', 'цели', 'целей'])}`, 'highlight');
         if (altBtn) altBtn.disabled = true;
@@ -2982,7 +3089,7 @@ controls.appendChild(settingsBtn);
             logAlternatives(alternatives);
 
             if (alternatives.size > 0) {
-                await assignAlternatives(alternatives, guildMembers, assignedCount, modeInfo);
+                await assignAlternatives(alternatives, guildMembers, assignedCount, modeInfo, mergedHistory);
             } else {
                 setPanelTitle('⚔️ Альтернатив не найдено');
                 scheduleAutoClose();
@@ -3180,8 +3287,19 @@ controls.appendChild(settingsBtn);
             html += `<div style="color:#80d4ff;margin-bottom:6px;">Режим: <b>${WAR_MODE_LABEL}</b>, ${where}</div>`;
             for (const r of records) {
                 const typeLabel = r.slotType === 'titan' ? 'титан' : (r.slotType === 'hero' ? 'герой' : '');
+
+                let extraInfo = '';
+                if (typeof r.winProbability === 'number') {
+                    const probPercent = Math.round(r.winProbability * 100);
+                    const probColor = probPercent >= 70 ? '#7fff7f' : (probPercent >= 50 ? '#ffd24d' : '#ff8a80');
+                    extraInfo += ` <span style="color:${probColor};font-weight:bold;" title="Расчётный шанс победы (10 симуляций)">🎲 ${probPercent}%</span>`;
+                }
+                if (r.replayId) {
+                    extraInfo += ` <a href="https://www.hero-wars.com/?replay_id=${r.replayId}" target="_blank" style="color:#80d4ff;text-decoration:none;margin-left:8px;" title="Открыть реплей">🔗 Реплей</a>`;
+                }
+
                 html += `<div style="margin-bottom:12px;padding:8px;border:1px solid #8a6d3b;border-radius:6px;">`;
-                html += `<div style="color:#ffd24d;font-weight:bold;">${r.slotLocation} — ${r.defenderName} ${badge[r.matchLevel] || ''}${typeLabel ? ` <span style="color:#888;">[${typeLabel}]</span>` : ''}</div>`;
+                html += `<div style="color:#ffd24d;font-weight:bold;">${r.slotLocation} — ${r.defenderName} ${badge[r.matchLevel] || ''}${typeLabel ? ` <span style="color:#888;">[${typeLabel}]</span>` : ''}${extraInfo}</div>`;
                 html += `<div style="color:#7fff7f;">⚔️ Атакует: <b>${r.memberName}</b></div>`;
                 html += `<div style="color:#b8d4e3;">⚔️ ${fmt(r.attackerUnits)}</div>`;
                 html += `<div style="color:#ff8a80;">🛡️ ${fmt(r.defenderUnits)}</div>`;
@@ -3200,7 +3318,16 @@ controls.appendChild(settingsBtn);
                 const textLines = records.map(r => {
                     const b = { exact: '✅', sameDefenderMinor: '⚠️ ~пит', otherDefenderExact: '🔄 ≠ID', otherDefenderMinor: '🔄⚠️ ≠ID~пит' };
                     const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
-                    let line = `📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${b[r.matchLevel] || ''}\n   ⚔️ Атакует: ${r.memberName}`;
+
+                    let extraInfo = '';
+                    if (typeof r.winProbability === 'number') {
+                        extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
+                    }
+                    if (r.replayId) {
+                        extraInfo += ` | 🔗 https://www.hero-wars.com/?replay_id=${r.replayId}`;
+                    }
+
+                    let line = `📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${b[r.matchLevel] || ''}${extraInfo}\n   ⚔️ Атакует: ${r.memberName}`;
                     if (r.attackerUnits && r.attackerUnits.length) {
                         const units = r.attackerUnits.map(u => {
                             let p = `${u.name} L${u.level || ''} ★${u.star || ''}`;
@@ -3344,8 +3471,20 @@ controls.appendChild(settingsBtn);
 
             for (const r of records) {
                 const typeLabel = r.slotType === 'titan' ? ' <span style="color:#888;">[титан]</span>' : (r.slotType === 'hero' ? ' <span style="color:#888;">[герой]</span>' : '');
+
+                let extraInfo = '';
+                if (typeof r.winProbability === 'number') {
+                    const probPercent = Math.round(r.winProbability * 100);
+                    const probColor = probPercent >= 70 ? '#7fff7f' : (probPercent >= 50 ? '#ffd24d' : '#ff8a80');
+                    extraInfo += ` <span style="color:${probColor};font-weight:bold;" title="Расчётный шанс победы (10 симуляций)">🎲 ${probPercent}%</span>`;
+                }
+                if (r.replayId) {
+                    extraInfo += ` <a href="https://www.hero-wars.com/?replay_id=${r.replayId}" target="_blank" style="color:#80d4ff;text-decoration:none;margin-left:8px;" title="Открыть реплей">🔗 Реплей</a>`;
+                }
+
                 html += `<div style="margin-bottom:10px;padding:8px;border:1px solid #8a6d3b;border-radius:6px;">`;
-                html += `<div style="color:#ffd24d;font-weight:bold;">📍 ${r.slotLocation} → ${r.defenderName} ${badge[r.matchLevel] || ''}${typeLabel}</div>`;
+                html += `<div style="color:#ffd24d;font-weight:bold;">📍 ${r.slotLocation} → ${r.defenderName} ${badge[r.matchLevel] || ''}${typeLabel}${extraInfo}</div>`;
+
                 if (r.attackerUnits && r.attackerUnits.length) {
                     const units = r.attackerUnits.map(u => {
                         const p = [`<b>${u.name}</b>`];
@@ -3406,7 +3545,16 @@ controls.appendChild(settingsBtn);
         const lines = [`🎯 Мои цели (${WAR_MODE_LABEL}, ${where}):`, ''];
         for (const r of records) {
             const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
-            lines.push(`📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${badge[r.matchLevel] || ''}`);
+
+            let extraInfo = '';
+            if (typeof r.winProbability === 'number') {
+                extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
+            }
+            if (r.replayId) {
+                extraInfo += ` | 🔗 hero-wars.com/?replay_id=${r.replayId}`;
+            }
+
+            lines.push(`📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${badge[r.matchLevel] || ''}${extraInfo}`);
             if (r.attackerUnits && r.attackerUnits.length) {
                 const units = r.attackerUnits.map(u => {
                     const p = [u.name];
@@ -3447,7 +3595,6 @@ controls.appendChild(settingsBtn);
 
         const info = window.__hwhCWLastInfo;
 
-        // v4.57: если сохранён старый режим СМ — молча выходим.
         if (info.mode === 'crossClanWar') {
             logDebug('showMyAssignmentsOnStart: legacy crossClanWar — пропускаем');
             return;
@@ -3577,7 +3724,6 @@ async function showSettings() {
 
     const popupPromise = popup.confirm(html, [{ msg: 'Закрыть', result: 0, color: 'green' }]);
 
-    // Привязываем обработчик после рендера попапа
     const bindCheckbox = (attempts = 0) => {
         const cb = document.getElementById('hwh-cw-show-on-start');
         if (cb) {
