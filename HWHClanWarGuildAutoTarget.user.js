@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии (каскадный подбор целей)
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.63
+// @version      4.64
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666, Nemo with AI
@@ -16,6 +16,7 @@
 // @downloadURL  https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTargetCascade.user.js
 // @updateURL    https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTargetCascade.user.js
 // ==/UserScript==
+
 
 (async function () {
     'use strict';
@@ -249,6 +250,48 @@
 
     function whereLabel(season, day) {
         return day != null ? `${season}/${day}` : `сезон ${season}`;
+    }
+
+/* ================================================================
+/  СОРТИРОВКА ПО НАЗВАНИЮ ЗДАНИЯ
+/ ================================================================ */
+    // Логический порядок зданий в игре (сверху вниз по карте)
+    const BUILDING_ORDER = [
+        'Ак.Магов',
+        'Маяк',
+        'Казармы',
+        'Мост',
+        'Источник',
+        'Литейная',
+        'Врата',
+        'Баст.Огня',
+        'Баст.Льда',
+        'Цитадель',
+    ];
+
+    function parseBuildingAndSub(slotLocation) {
+        // slotLocation вида "Мост-3 (#9)" или "Баст.Огня-2 (#20)"
+        const m = String(slotLocation || '').match(/^(.+?)-(\d+)\s*\(#\d+\)$/);
+        if (!m) return { building: 999, sub: 999, name: String(slotLocation || '') };
+        return { name: m[1], sub: parseInt(m[2], 10) };
+    }
+
+    function compareByBuildingName(a, b) {
+        const pa = parseBuildingAndSub(a.slotLocation);
+        const pb = parseBuildingAndSub(b.slotLocation);
+
+        // 1) по логическому порядку зданий
+        const ia = BUILDING_ORDER.indexOf(pa.name);
+        const ib = BUILDING_ORDER.indexOf(pb.name);
+        const ra = ia === -1 ? 999 : ia;
+        const rb = ib === -1 ? 999 : ib;
+        if (ra !== rb) return ra - rb;
+
+        // 2) для неизвестных зданий — алфавитно по названию
+        if (ra === 999 && pa.name !== pb.name) return pa.name.localeCompare(pb.name, 'ru');
+
+        // 3) внутри здания — по номеру слота
+        return pa.sub - pb.sub;
     }
 
 /* ================================================================
@@ -3271,7 +3314,7 @@ controls.appendChild(settingsBtn);
                 await popup.confirm(`За ${where} назначений (${WAR_MODE_LABEL}) нет.`, [{ msg: 'Ок', result: 0, color: 'green' }]);
                 return;
             }
-            records.sort((a, b) => a.slotId - b.slotId);
+            records.sort(compareByBuildingName);
             await hydrateAssignments(records);
             const fmt = (units) => {
                 if (!units || units.length === 0) return '<i>нет данных</i>';
@@ -3458,10 +3501,10 @@ controls.appendChild(settingsBtn);
             }
         }
 
-        // Сортировка по зданиям (slotId)
-        pending.sort((a, b) => a.slotId - b.slotId);
-        completed.sort((a, b) => a.slotId - b.slotId);
-        reassigned.sort((a, b) => a.slotId - b.slotId);
+        // Сортировка по названию здания
+        pending.sort(compareByBuildingName);
+        completed.sort(compareByBuildingName);
+        reassigned.sort(compareByBuildingName);
 
         return { pending, completed, reassigned };
     }
@@ -3469,9 +3512,9 @@ controls.appendChild(settingsBtn);
     function buildAssignmentsHtml(records, season, day, totalAssigned = null, reassigned = [], canAssign = true) {
         if (records.length === 0 && (!reassigned || reassigned.length === 0)) return '';
 
-        // Сортировка по зданиям (slotId)
-        records = [...records].sort((a, b) => a.slotId - b.slotId);
-        reassigned = [...(reassigned || [])].sort((a, b) => a.slotId - b.slotId);
+        // Сортировка по названию здания
+        records = [...records].sort(compareByBuildingName);
+        reassigned = [...(reassigned || [])].sort(compareByBuildingName);
 
         const badge = {
             exact: '<span style="color:#7fff7f;font-weight:bold;">✅ exact</span>',
@@ -3559,8 +3602,8 @@ controls.appendChild(settingsBtn);
     function formatAssignmentsAsText(records, season, day) {
         if (records.length === 0) return '';
 
-        // Сортировка по зданиям (slotId)
-        records = [...records].sort((a, b) => a.slotId - b.slotId);
+        // Сортировка по названию здания
+        records = [...records].sort(compareByBuildingName);
 
         const badge = {
             exact: '✅',
