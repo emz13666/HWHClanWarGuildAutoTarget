@@ -2,7 +2,7 @@
 // @name         HWHClanWarGuildAutoTarget
 // @name:ru      Авто-цели ВГ для гильдии (каскадный подбор целей)
 // @namespace    HWHClanWarGuildAutoTarget
-// @version      4.62
+// @version      4.63
 // @description  Automatically assigns Clan War targets to all guild members based on past full victories (+20 points). Shows building names instead of slot numbers. Caches replays in localStorage. Backup both history and replay cache to file. Accounts for pre-assigned targets. Logs team compositions in alternatives.
 // @description:ru Автоматически назначает цели в Войне Гильдий всем членам гильдии по истории полных побед (+20 очков). В логах показывает названия зданий вместо номеров слотов. Кэширует реплеи в localStorage. Бэкап истории и кэша реплеев в файл. Учитывает цели, уже назначенные генералом до запуска. Показывает составы пачек в альтернативных назначениях.
 // @author       emz13666, Nemo with AI
@@ -67,7 +67,10 @@
         return v === null ? SHOW_ASSIGNMENTS_ON_START : v === 'true';
     }
     function getNoUnitLevels() {
-    return localStorage.getItem(NO_UNIT_LEVELS_KEY) === 'true';
+        // По умолчанию — включено (не копировать уровень/звёзды),
+        // пока пользователь явно не переключит галочку в настройках.
+        const v = localStorage.getItem(NO_UNIT_LEVELS_KEY);
+        return v === null ? true : v === 'true';
     }
 
  /* ============================================================
@@ -3337,7 +3340,8 @@ controls.appendChild(settingsBtn);
                         const units = r.attackerUnits.map(u => {
                             let p = u.name;
                             if (!noLevels) {
-                                p += ` L${u.level || ''} ★${u.star || ''}`;
+                                if (u.level) p += ` L${u.level}`;
+                                if (u.star) p += ` ★${u.star}`;
                             }
                             if (u.petId) p += ` (${getHeroName(u.petId)})`;
                             return p;
@@ -3453,11 +3457,22 @@ controls.appendChild(settingsBtn);
                 pending.push(r);
             }
         }
+
+        // Сортировка по зданиям (slotId)
+        pending.sort((a, b) => a.slotId - b.slotId);
+        completed.sort((a, b) => a.slotId - b.slotId);
+        reassigned.sort((a, b) => a.slotId - b.slotId);
+
         return { pending, completed, reassigned };
     }
 
     function buildAssignmentsHtml(records, season, day, totalAssigned = null, reassigned = [], canAssign = true) {
         if (records.length === 0 && (!reassigned || reassigned.length === 0)) return '';
+
+        // Сортировка по зданиям (slotId)
+        records = [...records].sort((a, b) => a.slotId - b.slotId);
+        reassigned = [...(reassigned || [])].sort((a, b) => a.slotId - b.slotId);
+
         const badge = {
             exact: '<span style="color:#7fff7f;font-weight:bold;">✅ exact</span>',
             sameDefenderMinor: '<span style="color:#ffd24d;font-weight:bold;">⚠️ ~пит</span>',
@@ -3541,48 +3556,52 @@ controls.appendChild(settingsBtn);
         return html;
     }
 
-function formatAssignmentsAsText(records, season, day) {
-    if (records.length === 0) return '';
-    const badge = {
-        exact: '✅',
-        sameDefenderMinor: '⚠️ ~пит',
-        otherDefenderExact: '🔄 ≠ID',
-        otherDefenderMinor: '🔄⚠️ ≠ID~пит',
-    };
-    const noLevels = getNoUnitLevels();
-    const where = whereLabel(season, day);
-    const lines = [`🎯 Мои цели (${WAR_MODE_LABEL}, ${where}):`, ''];
-    for (const r of records) {
-        const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
+    function formatAssignmentsAsText(records, season, day) {
+        if (records.length === 0) return '';
 
-        let extraInfo = '';
-        if (typeof r.winProbability === 'number') {
-            extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
-        }
-        if (r.replayId) {
-            extraInfo += ` | 🔗 hero-wars.com/?replay_id=${r.replayId}`;
-        }
+        // Сортировка по зданиям (slotId)
+        records = [...records].sort((a, b) => a.slotId - b.slotId);
 
-        lines.push(`📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${badge[r.matchLevel] || ''}${extraInfo}`);
-        if (r.attackerUnits && r.attackerUnits.length) {
-            const units = r.attackerUnits.map(u => {
-                const p = [u.name];
-                if (!noLevels) {
-                    if (u.level) p.push(`L${u.level}`);
-                    if (u.star) p.push(`★${u.star}`);
-                }
-                if (u.power) p.push(`${Math.round(u.power / 1000)}k`);
-                if (u.petId) p.push(`(${getHeroName(u.petId)})`);
-                return p.join(' ');
-            });
-            lines.push(`   ⚔️ ${units.join(', ')}`);
-        } else {
-            lines.push(`   ⚔️ состав не сохранён (replayId: ${r.replayId || '?'})`);
+        const badge = {
+            exact: '✅',
+            sameDefenderMinor: '⚠️ ~пит',
+            otherDefenderExact: '🔄 ≠ID',
+            otherDefenderMinor: '🔄⚠️ ≠ID~пит',
+        };
+        const noLevels = getNoUnitLevels();
+        const where = whereLabel(season, day);
+        const lines = [`🎯 Мои цели (${WAR_MODE_LABEL}, ${where}):`, ''];
+        for (const r of records) {
+            const typeLabel = r.slotType === 'titan' ? ' [титан]' : (r.slotType === 'hero' ? ' [герой]' : '');
+
+            let extraInfo = '';
+            if (typeof r.winProbability === 'number') {
+                extraInfo += ` | 🎲 Шанс: ${Math.round(r.winProbability * 100)}%`;
+            }
+            if (r.replayId) {
+                extraInfo += ` | 🔗 hero-wars.com/?replay_id=${r.replayId}`;
+            }
+
+            lines.push(`📍 ${r.slotLocation}${typeLabel} → ${r.defenderName} ${badge[r.matchLevel] || ''}${extraInfo}`);
+            if (r.attackerUnits && r.attackerUnits.length) {
+                const units = r.attackerUnits.map(u => {
+                    const p = [u.name];
+                    if (!noLevels) {
+                        if (u.level) p.push(`L${u.level}`);
+                        if (u.star) p.push(`★${u.star}`);
+                    }
+                    if (u.power) p.push(`${Math.round(u.power / 1000)}k`);
+                    if (u.petId) p.push(`(${getHeroName(u.petId)})`);
+                    return p.join(' ');
+                });
+                lines.push(`   ⚔️ ${units.join(', ')}`);
+            } else {
+                lines.push(`   ⚔️ состав не сохранён (replayId: ${r.replayId || '?'})`);
+            }
+            lines.push('');
         }
-        lines.push('');
+        return lines.join('\n');
     }
-    return lines.join('\n');
-}
 
     function copyAssignmentsToClipboard(records, season, day) {
         const text = formatAssignmentsAsText(records, season, day);
