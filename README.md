@@ -41,8 +41,8 @@
 1. Установите расширение: [Tampermonkey](https://www.tampermonkey.net/) или [Violentmonkey](https://violentmonkey.github.io/).
 2. Убедитесь, что у вас установлен и работает основной скрипт [HeroWarsHelper (HWH)](https://greasyfork.org/ru/scripts/450693-herowarshelper).
 3. Установите скрипт одним из способов:
-   - 👉 [Установить с GitHub](https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTargetCascade.user.js)
-   - 👉 [Установить с GitVerse](https://gitverse.ru/api/repos/emz13/HWHClanWarGuildAutoTarget/raw/branch/main/HWHClanWarGuildAutoTargetCascade.user.js)
+   - 👉 [Установить с GitHub](https://raw.githubusercontent.com/emz13666/HWHClanWarGuildAutoTarget/main/HWHClanWarGuildAutoTarget.user.js)
+   - 👉 [Установить с GitVerse](https://gitverse.ru/api/repos/emz13/HWHClanWarGuildAutoTarget/raw/branch/main/HWHClanWarGuildAutoTarget.user.js)
 4. Подтвердите установку в менеджере скриптов.
 
 ## 🚀 Использование
